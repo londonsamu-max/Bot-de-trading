@@ -1,0 +1,33 @@
+instruments:
+  NAS100:
+    mt5_symbol: "NAS100"
+    mt5_alternatives: ["NAS100.r", "USTEC", "USTEC.r"]
+    gamma_ticker: "QQQ"          # SpotGamma uses QQQ/NDX for Nasdaq gamma
+    base_lot: 0.10
+    max_lot: 0.50
+    sl_atr_multiple: 2.0
+    tp_atr_multiple: 3.0
+    spread_typical_points: 1.5
+    trading_hours_utc: "13:30-20:00"
+
+  US30:
+    mt5_symbol: "US30"
+    mt5_alternatives: ["US30.r", "DJ30", "DJ30.r"]
+    gamma_ticker: "DIA"          # SpotGamma uses DIA/DJX for Dow gamma
+    base_lot: 0.10
+    max_lot: 0.50
+    sl_atr_multiple: 2.0
+    tp_atr_multiple: 3.0
+    spread_typical_points: 2.0
+    trading_hours_utc: "13:30-20:00"
+
+  XAUUSD:
+    mt5_symbol: "XAUUSD"
+    mt5_alternatives: ["XAUUSD.r", "GOLD", "GOLD.r"]
+    gamma_ticker: "GLD"          # GLD as gold gamma proxy
+    base_lot: 0.05
+    max_lot: 0.20
+    sl_atr_multiple: 1.5
+    tp_atr_multiple: 2.5
+    spread_typical_points: 3.0
+    trading_hours_utc: "00:00-23:00"

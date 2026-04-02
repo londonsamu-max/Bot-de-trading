@@ -1,0 +1,40 @@
+mode: "paper"  # "live", "paper", "backtest"
+
+mt5:
+  terminal_path: "C:/Program Files/Pepperstone MetaTrader 5/terminal64.exe"
+  server: ${MT5_SERVER}
+  login: ${MT5_LOGIN}
+  password: ${MT5_PASSWORD}
+  magic_number: 123456
+  deviation: 20  # Max slippage in points
+
+spotgamma:
+  email: ${SPOTGAMMA_EMAIL}
+  password: ${SPOTGAMMA_PASSWORD}
+  base_url: "https://dashboard.spotgamma.com"
+  refresh_interval_seconds: 900  # 15 minutes
+  cache_ttl_seconds: 300  # 5 min cache for repeated calls
+
+risk:
+  max_risk_per_trade_pct: 0.01      # 1% of equity per trade
+  max_daily_drawdown_pct: 0.02      # 2% daily max drawdown
+  max_weekly_drawdown_pct: 0.05     # 5% weekly max drawdown
+  max_positions_total: 3
+  max_positions_per_instrument: 1
+  min_free_margin_pct: 0.50         # Keep 50% free margin
+  correlated_pairs:
+    - ["NAS100", "US30"]
+  max_correlated_exposure_multiplier: 1.5
+
+trading:
+  tick_interval_seconds: 300        # Decision loop every 5 min
+  sl_type: "atr"                    # "atr" or "fixed_points"
+  trailing_stop_enabled: true
+  trailing_stop_activation_atr: 1.5
+  trailing_stop_distance_atr: 1.0
+  breakeven_at_atr: 1.0
+
+logging:
+  level: "INFO"
+  file: "logs/trading.log"
+  json_format: true

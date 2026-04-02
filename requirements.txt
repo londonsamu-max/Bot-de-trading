@@ -1,0 +1,13 @@
+MetaTrader5>=5.0.45
+stable-baselines3>=2.3.0
+sb3-contrib>=2.3.0
+torch>=2.0
+gymnasium>=0.29
+numpy>=1.24
+pandas>=2.0
+ta>=0.11.0
+pyyaml>=6.0
+python-dotenv>=1.0
+requests>=2.31
+tensorboard>=2.14
+pytest>=7.0
