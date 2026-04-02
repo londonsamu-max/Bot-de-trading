@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+*.log
+models/*.zip
+models/*.pkl
+data/*.parquet
+data/*.csv
+logs/*.log
+logs/*.json
+.vscode/
+.idea/
+*.swp
+*.swo
