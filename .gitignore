@@ -9,9 +9,14 @@ models/*.zip
 models/*.pkl
 data/*.parquet
 data/*.csv
+!data/*.ejemplo.csv
+data/workflow_state.json
+data/whatsapp_inbox.jsonl
 logs/*.log
 logs/*.json
+logs/whatsapp_pendientes.txt
 .vscode/
 .idea/
 *.swp
 *.swo
+.pytest_cache/

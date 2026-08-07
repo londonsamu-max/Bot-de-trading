@@ -1,0 +1,160 @@
+# Flujo: correos de clientes -> confirmación de asistencia -> envío del trabajo
+# Los valores ${VAR} se leen del archivo .env
+
+general:
+  empresa: "JB Renovate"
+  contacto: "Workorder@jbrenovate.com"
+  intervalo_segundos: 300      # cada cuánto se revisa la bandeja (5 min)
+  codigo_pais: "+1"            # se antepone a los teléfonos sin prefijo
+
+rutas:
+  inventario: "data/inventario.csv"
+  trabajadores: "data/trabajadores.csv"
+  estado: "data/workflow_state.json"
+  whatsapp_inbox: "data/whatsapp_inbox.jsonl"
+
+email:
+  # Google Workspace: imap.gmail.com / smtp.gmail.com (usa contraseña de aplicación)
+  # Microsoft 365:    outlook.office365.com / smtp.office365.com
+  imap_host: ${IMAP_HOST}
+  imap_port: 993
+  smtp_host: ${SMTP_HOST}
+  smtp_port: 587
+  smtp_ssl: false              # true si tu proveedor usa SSL directo en el puerto 465
+  usuario: ${WORKFLOW_EMAIL_USER}
+  password: ${WORKFLOW_EMAIL_PASSWORD}
+  remitente_visible: "JB Renovate <Workorder@jbrenovate.com>"
+  buzon: "INBOX"
+  max_correos_por_ciclo: 25
+  max_caracteres_cuerpo: 20000
+
+whatsapp:
+  # manual  -> escribe los mensajes en logs/whatsapp_pendientes.txt con enlaces wa.me
+  # twilio  -> API de Twilio
+  # meta    -> WhatsApp Cloud API
+  proveedor: "manual"
+  respaldo_email: true         # si WhatsApp falla, se manda el mismo mensaje por correo
+  manual:
+    archivo_pendientes: "logs/whatsapp_pendientes.txt"
+  twilio:
+    account_sid: ${TWILIO_ACCOUNT_SID}
+    auth_token: ${TWILIO_AUTH_TOKEN}
+    numero_origen: ${TWILIO_WHATSAPP_FROM}
+  meta:
+    phone_number_id: ${META_PHONE_NUMBER_ID}
+    access_token: ${META_ACCESS_TOKEN}
+    api_version: "v21.0"
+    plantilla: ""              # nombre de la plantilla aprobada; vacío = texto libre
+    idioma_plantilla: "es"
+    verify_token: ${META_VERIFY_TOKEN}
+
+recepcion:
+  # Vacío = se aceptan correos de cualquier remitente.
+  # Acepta direcciones completas ("cliente@ejemplo.com") o dominios ("ejemplo.com").
+  remitentes_permitidos: []
+  remitentes_ignorados:
+    - "notifications@"
+    - "billing@"
+  acusar_recibo: true          # responder al cliente cuando se registra su solicitud
+  avisar_asignacion: true      # avisarle cuando ya hay cuadrilla asignada
+
+parser:
+  trabajadores_por_defecto: 1  # si el correo no dice cuántos se necesitan
+  max_items: 50
+  # Etiquetas adicionales que usen tus clientes, además de las que ya reconoce
+  etiquetas_extra:
+    direccion: ["job site", "jobsite", "property"]
+    items: ["lista de material", "material list"]
+
+asistencia:
+  recordatorio_minutos: 60     # recordatorio si no responden en 1 hora
+  expiracion_horas: 4          # después de 4 horas la convocatoria expira
+  margen_convocatoria: 1       # se convoca a 1 persona extra por si alguien dice NO
+
+despacho:
+  reservar_inventario: true    # descuenta el material del disponible al asignar
+  exigir_inventario_completo: false  # true = no manda la orden si falta material
+
+alertas:
+  email_supervisor: ${SUPERVISOR_EMAIL}
+  whatsapp_supervisor: ${SUPERVISOR_WHATSAPP}
+
+logging:
+  level: "INFO"
+  file: "logs/workflow.log"
+
+# Plantillas de los mensajes. Las llaves {...} se reemplazan automáticamente:
+# {job_id} {cliente} {fecha} {hora} {direccion} {zona} {descripcion} {materiales}
+# {faltantes} {trabajador} {cuadrilla} {requeridos} {confirmados} {convocados}
+# {empresa} {contacto}
+mensajes:
+  convocatoria: |
+    Hola {trabajador}, hay trabajo disponible.
+
+    Folio: {job_id}
+    Cliente: {cliente}
+    Fecha: {fecha} {hora}
+    Dirección: {direccion}
+
+    Trabajo:
+    {descripcion}
+
+    Material que se entrega:
+    {materiales}
+
+    ¿Puedes asistir? Responde SI o NO a este mensaje.
+
+  recordatorio: |
+    Recordatorio {job_id} ({fecha} {hora} - {direccion}).
+    Seguimos esperando tu respuesta: SI o NO.
+
+  orden_trabajo: |
+    CONFIRMADO - Orden de trabajo {job_id}
+
+    Cliente: {cliente}
+    Fecha: {fecha} {hora}
+    Dirección: {direccion}
+    Cuadrilla: {cuadrilla}
+
+    Trabajo a realizar:
+    {descripcion}
+
+    Material asignado:
+    {materiales}
+
+    Recoge el material antes de salir. Cualquier cambio avisa a {contacto}.
+
+  acuse_cliente: |
+    Hola {cliente},
+
+    Recibimos su solicitud y quedó registrada con el folio {job_id}.
+    Fecha programada: {fecha} {hora}
+    Dirección: {direccion}
+
+    Ya estamos confirmando al personal y le avisamos en cuanto quede asignado.
+
+    Saludos,
+    {empresa}
+
+  cliente_asignado: |
+    Hola {cliente},
+
+    Su servicio {job_id} quedó asignado para {fecha} {hora}.
+    Personal asignado: {cuadrilla}
+    Dirección: {direccion}
+
+    Saludos,
+    {empresa}
+
+  alerta_sin_personal: |
+    ATENCIÓN: el trabajo {job_id} ({cliente}, {fecha} {hora}) no tiene personal confirmado.
+    Convocados: {convocados} | Confirmados: {confirmados} de {requeridos}
+    Dirección: {direccion}
+
+    Hay que asignarlo a mano.
+
+  alerta_inventario: |
+    Faltante de material para {job_id} ({cliente}):
+    {faltantes}
+
+    El trabajo sigue en pie, pero hay que comprar o sustituir ese material.

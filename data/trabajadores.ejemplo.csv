@@ -1,0 +1,7 @@
+id,nombre,telefono,email,habilidades,zona,activo
+T01,Juan Perez,+15551234001,juan.perez@ejemplo.com,pintura|drywall,norte,si
+T02,Maria Lopez,+15551234002,maria.lopez@ejemplo.com,pintura|acabados,norte,si
+T03,Carlos Ruiz,+15551234003,carlos.ruiz@ejemplo.com,drywall|carpinteria,sur,si
+T04,Ana Torres,+15551234004,ana.torres@ejemplo.com,limpieza|pintura,sur,si
+T05,Luis Gomez,+15551234005,luis.gomez@ejemplo.com,plomeria|drywall,centro,si
+T06,Rosa Diaz,+15551234006,rosa.diaz@ejemplo.com,electricidad,centro,no
