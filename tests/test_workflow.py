@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.workflow.attendance import AttendanceManager
-from src.workflow.email_client import CorreoEntrante, _html_to_text
+from src.workflow.email_client import Adjunto, CorreoEntrante, _html_to_text
 from src.workflow.inbox import WhatsAppInbox
 from src.workflow.inventory import Inventory
 from src.workflow.messages import MessageBuilder
@@ -36,7 +36,8 @@ from src.workflow.parser import (
     parse_date,
     parse_quantity_line,
 )
-from src.workflow.runner import WorkflowRunner
+from src.workflow.runner import WorkflowRunner, _nombre_seguro
+from src.workflow.schedule import VentanaDeEnvio
 from src.workflow.store import WorkflowStore
 from src.workflow.webhook import parse_payload
 from src.workflow.workers import WorkerRoster
@@ -121,15 +122,17 @@ class FakeEmail:
     def mark_seen(self, uids):
         self.marcados.extend(uids)
 
-    def send(self, destinatario, asunto, cuerpo, responder_a=""):
-        self.enviados.append({"para": destinatario, "asunto": asunto, "cuerpo": cuerpo})
+    def send(self, destinatario, asunto, cuerpo, responder_a="", adjuntos=None):
+        self.enviados.append({"para": destinatario, "asunto": asunto, "cuerpo": cuerpo,
+                              "adjuntos": list(adjuntos or [])})
         return True
 
 
 def build_config(tmp_path, datos) -> dict:
     return {
         "general": {"empresa": "JB Renovate", "contacto": "wo@jb.com",
-                    "intervalo_segundos": 1, "codigo_pais": "+1"},
+                    "intervalo_segundos": 1, "codigo_pais": "+1",
+                    "horario_envios": {"activo": False}},
         "rutas": {
             "inventario": str(datos["inventario"]),
             "trabajadores": str(datos["trabajadores"]),
@@ -160,10 +163,11 @@ def runner(tmp_path, datos):
 
 
 def correo(cuerpo=CORREO_CLIENTE, asunto="Solicitud de pintura",
-           remitente="ing.vega@constructoravega.com", uid="1"):
+           remitente="ing.vega@constructoravega.com", uid="1", adjuntos=None):
     return CorreoEntrante(
         uid=uid, message_id=f"<{uid}@test>", remitente_nombre="Ing. Vega",
         remitente_email=remitente, asunto=asunto, cuerpo=cuerpo,
+        adjuntos=list(adjuntos or []),
     )
 
 
@@ -695,3 +699,184 @@ def test_completar_descuenta_una_sola_vez(tmp_path, datos):
     inventario.consumir(items)   # segunda llamada: ya no hay nada reservado
 
     assert inventario.articulos["PIN-BLA-5"].stock == 8
+
+
+# --- formulario web reenviado -----------------------------------------------
+
+# Asi llega una solicitud del formulario "Drop us a line!" de jbrenovate.com:
+# reenviada por GoDaddy, con el cliente real dentro del cuerpo.
+FORMULARIO_WEB = """\
+You have a new message from your website contact form.
+
+Name: Sarah Miller
+Email: sarah.miller@gmail.com
+Phone: (555) 987-6543
+Message: Hi, I need the hallway drywall patched and the whole second floor
+repainted. Looking to get this done the week of 9/15.
+
+Address: 44 Elm Street, Apt 3
+Date: 15/09/2026
+
+Materials:
+- 3 Panel de drywall 1/2
+- 2 cubetas Pintura blanca 5 galones
+
+Thanks,
+Sarah
+"""
+
+
+def test_formulario_web_saca_al_cliente_del_cuerpo():
+    """El remitente es GoDaddy; el cliente de verdad va dentro del mensaje."""
+    campos = EmailJobParser().parse("New form submission", FORMULARIO_WEB,
+                                    remitente_email="noreply@godaddy.com")
+
+    assert campos["cliente_nombre"] == "Sarah Miller"
+    assert campos["cliente_email"] == "sarah.miller@gmail.com"
+    assert campos["cliente_telefono"] == "(555) 987-6543"
+    assert campos["direccion"] == "44 Elm Street, Apt 3"
+    assert campos["fecha_servicio"] == "2026-09-15"
+    assert "drywall patched" in campos["descripcion"]
+    assert "Thanks" not in campos["descripcion"]   # la despedida en ingles se corta
+    assert len(campos["items"]) == 2
+
+
+def test_reenviador_no_se_filtra_como_noreply(tmp_path, datos):
+    """Sin esto, cada solicitud del sitio web se perderia por venir de un noreply."""
+    config = build_config(tmp_path, datos)
+    config["recepcion"]["reenviadores"] = ["@godaddy.com"]
+    runner = WorkflowRunner(config)
+    runner.email = FakeEmail(entrantes=[correo(cuerpo=FORMULARIO_WEB,
+                                               remitente="noreply@godaddy.com")])
+    runner.notifier = Notifier(FakeWhatsApp(), email_client=runner.email)
+
+    assert runner.run_once()["trabajos_nuevos"] == 1
+    trabajo = next(iter(runner.store.trabajos.values()))
+    assert trabajo.cliente_email == "sarah.miller@gmail.com"
+    # El acuse de recibo va al cliente, no a GoDaddy.
+    acuses = [e for e in runner.email.enviados if "Recibimos su solicitud" in e["asunto"]]
+    assert acuses and acuses[0]["para"] == "sarah.miller@gmail.com"
+
+
+def test_sin_reenviadores_configurados_el_noreply_se_ignora(runner):
+    """El filtro de automaticos sigue vivo para quien no esta declarado."""
+    runner.email.entrantes = [correo(cuerpo=FORMULARIO_WEB,
+                                     remitente="noreply@godaddy.com")]
+    assert runner.run_once()["trabajos_nuevos"] == 0
+
+
+# --- adjuntos ---------------------------------------------------------------
+
+def test_fotos_del_cliente_se_guardan_y_viajan_con_la_orden(tmp_path, datos):
+    config = build_config(tmp_path, datos)
+    config["recepcion"]["carpeta_adjuntos"] = str(tmp_path / "adjuntos")
+    runner = WorkflowRunner(config)
+    runner.email = FakeEmail(entrantes=[correo(
+        cuerpo=CORREO_CLIENTE.replace("Trabajadores: 2", "Trabajadores: 1"),
+        adjuntos=[Adjunto("pasillo.jpg", b"\xff\xd8foto", "image/jpeg"),
+                  Adjunto("../../escape.png", b"png", "image/png")],
+    )])
+    runner.notifier = Notifier(FakeWhatsApp(), email_client=runner.email)
+    runner.run_once()
+
+    trabajo = next(iter(runner.store.trabajos.values()))
+    assert len(trabajo.adjuntos) == 2
+    assert Path(trabajo.adjuntos[0]).read_bytes() == b"\xff\xd8foto"
+    # El nombre malicioso queda contenido dentro de la carpeta del folio.
+    assert Path(trabajo.adjuntos[1]).parent.name == trabajo.id
+    assert ".." not in Path(trabajo.adjuntos[1]).name
+
+    runner.inbox.append("+15551234001", "SI")
+    runner.run_once()
+
+    ordenes = [e for e in runner.email.enviados if "Orden de trabajo" in e["asunto"]]
+    assert len(ordenes) == 1
+    assert ordenes[0]["adjuntos"] == trabajo.adjuntos
+    assert "2 fotos" in ordenes[0]["cuerpo"]
+
+
+@pytest.mark.parametrize("entrada,esperado", [
+    ("../../etc/passwd", "passwd"),   # Path.name descarta la ruta entera
+    ("foto vestibulo.jpg", "foto vestibulo.jpg"),
+    ("/absoluto/x.png", "x.png"),
+    ("", ""),
+])
+def test_nombre_seguro(entrada, esperado):
+    assert _nombre_seguro(entrada) == esperado
+
+
+# --- ventana de envio -------------------------------------------------------
+
+def _cuando(dia_mes, hora):
+    """Septiembre 2026: el 14 es lunes y el 19 es sabado."""
+    return datetime(2026, 9, dia_mes, hora, 0, tzinfo=timezone.utc)
+
+
+def test_ventana_respeta_horario_y_dias():
+    ventana = VentanaDeEnvio({"inicio": "08:00", "fin": "19:00", "dias": [1, 2, 3, 4, 5],
+                              "zona_horaria": "UTC"})
+    assert ventana.abierta(_cuando(14, 10))     # lunes 10:00
+    assert not ventana.abierta(_cuando(14, 3))  # lunes 03:00
+    assert not ventana.abierta(_cuando(14, 22))
+    assert not ventana.abierta(_cuando(19, 10))  # sabado
+
+
+def test_ventana_desactivada_siempre_abierta():
+    assert VentanaDeEnvio({"activo": False}).abierta(_cuando(19, 3))
+
+
+def test_ventana_proxima_apertura_salta_el_fin_de_semana():
+    ventana = VentanaDeEnvio({"inicio": "08:00", "fin": "19:00", "dias": [1, 2, 3, 4, 5],
+                              "zona_horaria": "UTC"})
+    proxima = ventana.proxima_apertura(_cuando(19, 10))   # sabado
+    assert proxima.isoweekday() == 1 and proxima.hour == 8
+
+
+def test_ventana_hora_invalida_no_revienta():
+    ventana = VentanaDeEnvio({"inicio": "ocho de la manana", "zona_horaria": "UTC"})
+    assert ventana.inicio.hour == 8
+
+
+def test_de_noche_no_se_convoca_pero_tampoco_se_da_por_perdido(tmp_path, datos):
+    """A las 3am no se molesta a nadie, y el trabajo espera a la manana."""
+    config = build_config(tmp_path, datos)
+    config["general"]["horario_envios"] = {"activo": True, "inicio": "08:00",
+                                           "fin": "19:00", "dias": [1, 2, 3, 4, 5],
+                                           "zona_horaria": "UTC"}
+    runner = WorkflowRunner(config)
+    runner.email = FakeEmail(entrantes=[correo()])
+    whatsapp = FakeWhatsApp()
+    runner.notifier = Notifier(whatsapp, email_client=runner.email)
+    runner.horario.abierta = lambda ahora=None: False
+
+    resumen = runner.run_once()
+    trabajo = next(iter(runner.store.trabajos.values()))
+
+    assert resumen["convocatorias_enviadas"] == 0
+    assert whatsapp.enviados == []
+    assert trabajo.convocatorias == {}
+    assert trabajo.estado == EstadoTrabajo.NUEVO.value        # no "sin_personal"
+    assert resumen["trabajos_sin_personal"] == 0
+
+    # Al abrir la ventana, el mismo trabajo se convoca normalmente.
+    runner.horario.abierta = lambda ahora=None: True
+    assert runner.run_once()["convocatorias_enviadas"] == 2
+
+
+def test_orden_de_trabajo_sale_aunque_este_fuera_de_horario(tmp_path, datos):
+    """Quien ya confirmo espera los datos; eso no se retiene."""
+    config = build_config(tmp_path, datos)
+    runner = WorkflowRunner(config)
+    runner.email = FakeEmail(entrantes=[correo(
+        cuerpo=CORREO_CLIENTE.replace("Trabajadores: 2", "Trabajadores: 1"))])
+    whatsapp = FakeWhatsApp()
+    runner.notifier = Notifier(whatsapp, email_client=runner.email)
+    runner.run_once()
+
+    trabajo = next(iter(runner.store.trabajos.values()))
+    runner.horario.abierta = lambda ahora=None: False   # cae la noche
+    runner.inbox.append("+15551234001", "SI")
+    runner.run_once()
+
+    assert runner.store.get(trabajo.id).estado == EstadoTrabajo.ASIGNADO.value
+    assert any("Orden de trabajo" in m for _, m in whatsapp.enviados)

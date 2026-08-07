@@ -23,7 +23,12 @@ logger = logging.getLogger(__name__)
 
 # Field name -> accepted labels in the email body.
 FIELD_ALIASES: dict[str, list[str]] = {
-    "cliente": ["cliente", "client", "customer", "nombre", "nombre del cliente"],
+    # "name" / "email" / "phone" / "message" are the field labels of the website
+    # contact form, which reaches the mailbox as a forwarded notification.
+    "cliente": ["cliente", "client", "customer", "nombre", "name",
+                "nombre del cliente", "full name", "your name"],
+    "email": ["email", "correo", "e-mail", "correo electronico", "your email",
+              "email address", "reply to", "reply-to"],
     "direccion": ["direccion", "address", "domicilio", "ubicacion", "lugar", "sitio"],
     "fecha": ["fecha", "date", "fecha de servicio", "fecha del servicio", "dia", "día"],
     "hora": ["hora", "time", "horario", "hora de llegada"],
@@ -35,9 +40,20 @@ FIELD_ALIASES: dict[str, list[str]] = {
     "items": ["materiales", "material", "insumos", "inventario", "items",
               "articulos", "productos", "supplies", "materials"],
     "descripcion": ["descripcion", "detalle", "detalles", "trabajo", "description",
-                    "notas", "observaciones", "scope"],
-    "telefono": ["telefono", "tel", "phone", "celular", "movil", "contacto"],
+                    "notas", "observaciones", "scope", "message", "mensaje",
+                    "comments", "comentarios", "project", "proyecto"],
+    "telefono": ["telefono", "tel", "phone", "celular", "movil", "contacto",
+                 "phone number", "mobile", "cell"],
 }
+
+EMAIL_PATTERN = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]{2,}")
+
+# Lines from here down are a sign-off, not part of the job description.
+_DESPEDIDAS = (
+    "saludos", "gracias", "atte", "atentamente", "quedo atento", "enviado desde",
+    "thanks", "thank you", "regards", "best regards", "best,", "sincerely",
+    "cheers", "sent from", "get outlook", "kind regards",
+)
 
 # Units recognised in a material line. Anything else after the quantity is
 # treated as part of the description ("3 Pintura" -> 3 u of "Pintura").
@@ -278,9 +294,18 @@ class EmailJobParser:
             if numeros:
                 trabajadores = max(1, int(numeros[0]))
 
+        # A website form arrives forwarded, so the envelope sender is the form
+        # service. The address the client typed in the body is the one to reply to.
+        cliente_email = remitente_email
+        if campos.get("email"):
+            match = EMAIL_PATTERN.search(campos["email"])
+            if match:
+                cliente_email = match.group(0).lower()
+
         return {
-            "cliente_nombre": campos.get("cliente") or remitente_nombre or remitente_email,
-            "cliente_email": remitente_email,
+            "cliente_nombre": campos.get("cliente") or remitente_nombre or cliente_email,
+            "cliente_email": cliente_email,
+            "cliente_telefono": campos.get("telefono", ""),
             "asunto": asunto,
             "descripcion": descripcion,
             "direccion": campos.get("direccion", ""),
@@ -373,7 +398,7 @@ class EmailJobParser:
                 continue
             if self._match_label(limpia)[0]:
                 continue
-            if strip_accents(limpia).startswith(("saludos", "gracias", "atte", "enviado desde")):
+            if strip_accents(limpia).startswith(_DESPEDIDAS):
                 break
             utiles.append(limpia)
         return "\n".join(utiles).strip() or asunto

@@ -9,15 +9,26 @@ config/workflow.yaml.
 import email
 import imaplib
 import logging
+import mimetypes
 import smtplib
 import ssl
 from dataclasses import dataclass, field
 from email.header import decode_header, make_header
 from email.message import EmailMessage
 from email.utils import parseaddr
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Adjunto:
+    """A file attached to an incoming email (usually a photo of the job)."""
+
+    nombre: str
+    datos: bytes
+    tipo: str = ""
 
 
 @dataclass
@@ -33,6 +44,7 @@ class CorreoEntrante:
     fecha: str = ""
     in_reply_to: str = ""
     destinatarios: list[str] = field(default_factory=list)
+    adjuntos: list[Adjunto] = field(default_factory=list)
 
 
 class EmailClient:
@@ -50,6 +62,8 @@ class EmailClient:
         self.smtp_ssl = bool(config.get("smtp_ssl", False))
         self.max_por_ciclo = int(config.get("max_correos_por_ciclo", 25))
         self.max_cuerpo = int(config.get("max_caracteres_cuerpo", 20000))
+        self.max_adjunto_bytes = int(config.get("max_adjunto_mb", 10)) * 1024 * 1024
+        self.max_adjuntos = int(config.get("max_adjuntos_por_correo", 10))
 
     # --- reading ------------------------------------------------------------
 
@@ -95,6 +109,7 @@ class EmailClient:
             remitente_email=direccion.lower(),
             asunto=_decode(mensaje.get("Subject", "")),
             cuerpo=self._extract_body(mensaje),
+            adjuntos=self._extract_attachments(mensaje),
             fecha=mensaje.get("Date", ""),
             in_reply_to=(mensaje.get("In-Reply-To") or "").strip(),
             destinatarios=[a.strip().lower() for a in (mensaje.get("To") or "").split(",")
@@ -117,6 +132,36 @@ class EmailClient:
 
         cuerpo = texto or _html_to_text(html)
         return cuerpo[: self.max_cuerpo]
+
+    def _extract_attachments(self, mensaje: email.message.Message) -> list["Adjunto"]:
+        """Collect attached files (clients send photos of the job to be done)."""
+        adjuntos: list[Adjunto] = []
+        for parte in mensaje.walk():
+            if parte.get_content_maintype() == "multipart":
+                continue
+            disposicion = (parte.get("Content-Disposition") or "").lower()
+            nombre = parte.get_filename()
+            if "attachment" not in disposicion and not nombre:
+                continue
+
+            datos = parte.get_payload(decode=True)
+            if not datos:
+                continue
+            if len(datos) > self.max_adjunto_bytes:
+                logger.warning("Adjunto '%s' omitido: pesa %.1f MB",
+                               nombre, len(datos) / 1024 / 1024)
+                continue
+
+            adjuntos.append(Adjunto(
+                nombre=_decode(nombre or "adjunto"),
+                datos=datos,
+                tipo=parte.get_content_type(),
+            ))
+            if len(adjuntos) >= self.max_adjuntos:
+                logger.warning("Se alcanzó el máximo de %d adjuntos por correo",
+                               self.max_adjuntos)
+                break
+        return adjuntos
 
     @staticmethod
     def _decode_part(parte: email.message.Message) -> str:
@@ -149,8 +194,8 @@ class EmailClient:
     # --- sending ------------------------------------------------------------
 
     def send(self, destinatario: str, asunto: str, cuerpo: str,
-             responder_a: str = "") -> bool:
-        """Send a plain-text email. Returns True on success."""
+             responder_a: str = "", adjuntos: Optional[list[str]] = None) -> bool:
+        """Send a plain-text email, optionally attaching files by path."""
         if not destinatario:
             logger.warning("Envío omitido: destinatario vacío (asunto: %s)", asunto)
             return False
@@ -163,6 +208,9 @@ class EmailClient:
             mensaje["In-Reply-To"] = responder_a
             mensaje["References"] = responder_a
         mensaje.set_content(cuerpo)
+
+        for ruta in adjuntos or []:
+            self._adjuntar(mensaje, ruta)
 
         try:
             if self.smtp_ssl:
@@ -181,6 +229,22 @@ class EmailClient:
 
         logger.info("Correo enviado a %s: %s", destinatario, asunto)
         return True
+
+    @staticmethod
+    def _adjuntar(mensaje: EmailMessage, ruta: str) -> None:
+        """Attach one file; a missing or unreadable file must not block the email."""
+        archivo = Path(ruta)
+        try:
+            datos = archivo.read_bytes()
+        except OSError as e:
+            logger.warning("No se pudo adjuntar %s: %s", ruta, e)
+            return
+
+        tipo, _ = mimetypes.guess_type(archivo.name)
+        principal, _, secundario = (tipo or "application/octet-stream").partition("/")
+        mensaje.add_attachment(datos, maintype=principal,
+                               subtype=secundario or "octet-stream",
+                               filename=archivo.name)
 
 
 def _decode(valor: str) -> str:

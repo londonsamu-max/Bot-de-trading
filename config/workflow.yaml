@@ -7,6 +7,18 @@ general:
   intervalo_segundos: 300      # cada cuánto se revisa la bandeja (5 min)
   codigo_pais: "+1"            # se antepone a los teléfonos sin prefijo
 
+  # Las convocatorias llegan al celular personal de la gente, así que solo salen
+  # dentro de este horario. Las órdenes de trabajo (a quien ya dijo que sí) y las
+  # alertas al supervisor NO se retienen nunca.
+  # Basado en el horario publicado en jbrenovate.com (lun-vie 9:00-17:00),
+  # ampliado porque las cuadrillas arrancan antes que la oficina.
+  horario_envios:
+    activo: true
+    inicio: "08:00"
+    fin: "19:00"
+    dias: [1, 2, 3, 4, 5]       # 1=lunes ... 7=domingo
+    zona_horaria: "America/New_York"   # <-- AJUSTA ESTO a tu zona real
+
 rutas:
   inventario: "data/inventario.csv"
   trabajadores: "data/trabajadores.csv"
@@ -27,6 +39,8 @@ email:
   buzon: "INBOX"
   max_correos_por_ciclo: 25
   max_caracteres_cuerpo: 20000
+  max_adjunto_mb: 10           # las fotos del formulario web
+  max_adjuntos_por_correo: 10
 
 whatsapp:
   # manual  -> escribe los mensajes en logs/whatsapp_pendientes.txt con enlaces wa.me
@@ -49,14 +63,26 @@ whatsapp:
     verify_token: ${META_VERIFY_TOKEN}
 
 recepcion:
+  # El sitio (jbrenovate.com) no publica correo: los clientes escriben por el
+  # formulario "Drop us a line!" y por Bookings, y eso llega al buzón REENVIADO
+  # por GoDaddy. Esos remitentes automáticos van aquí para que no se filtren
+  # como "noreply" y para sacar el cliente real del cuerpo del mensaje.
+  # Revisa un correo que ya te haya llegado y ajusta la lista al remitente exacto.
+  reenviadores:
+    - "@godaddy.com"
+    - "@secureserver.net"
+    - "@email.godaddy.com"
+
   # Vacío = se aceptan correos de cualquier remitente.
   # Acepta direcciones completas ("cliente@ejemplo.com") o dominios ("ejemplo.com").
+  # Los reenviadores de arriba pasan siempre, estén o no en esta lista.
   remitentes_permitidos: []
   remitentes_ignorados:
     - "notifications@"
     - "billing@"
   acusar_recibo: true          # responder al cliente cuando se registra su solicitud
   avisar_asignacion: true      # avisarle cuando ya hay cuadrilla asignada
+  carpeta_adjuntos: "data/adjuntos"   # aquí se guardan las fotos que manda el cliente
 
 parser:
   trabajadores_por_defecto: 1  # si el correo no dice cuántos se necesitan
@@ -84,9 +110,9 @@ logging:
   file: "logs/workflow.log"
 
 # Plantillas de los mensajes. Las llaves {...} se reemplazan automáticamente:
-# {job_id} {cliente} {fecha} {hora} {direccion} {zona} {descripcion} {materiales}
-# {faltantes} {trabajador} {cuadrilla} {requeridos} {confirmados} {convocados}
-# {empresa} {contacto}
+# {job_id} {cliente} {cliente_email} {telefono_cliente} {fecha} {hora} {direccion}
+# {zona} {descripcion} {materiales} {faltantes} {adjuntos} {trabajador} {cuadrilla}
+# {requeridos} {confirmados} {convocados} {empresa} {contacto}
 mensajes:
   convocatoria: |
     Hola {trabajador}, hay trabajo disponible.
@@ -112,6 +138,7 @@ mensajes:
     CONFIRMADO - Orden de trabajo {job_id}
 
     Cliente: {cliente}
+    Teléfono del cliente: {telefono_cliente}
     Fecha: {fecha} {hora}
     Dirección: {direccion}
     Cuadrilla: {cuadrilla}
@@ -121,6 +148,8 @@ mensajes:
 
     Material asignado:
     {materiales}
+
+    Fotos del cliente: {adjuntos}
 
     Recoge el material antes de salir. Cualquier cambio avisa a {contacto}.
 

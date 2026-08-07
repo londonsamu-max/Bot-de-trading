@@ -14,8 +14,10 @@ that was already sent, because state is saved with what went out.
 """
 
 import logging
+import re
 import time
 from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from src.workflow.attendance import AttendanceManager
@@ -33,6 +35,7 @@ from src.workflow.models import (
 )
 from src.workflow.notifier import Notifier, ResultadoEnvio, build_whatsapp_notifier
 from src.workflow.parser import EmailJobParser, extract_job_id, parse_answer, strip_accents
+from src.workflow.schedule import VentanaDeEnvio
 from src.workflow.store import WorkflowStore
 from src.workflow.workers import WorkerRoster
 
@@ -76,8 +79,14 @@ class WorkflowRunner:
         recepcion = config.get("recepcion", {})
         self.remitentes_permitidos = [s.lower() for s in recepcion.get("remitentes_permitidos", [])]
         self.remitentes_ignorados = [s.lower() for s in recepcion.get("remitentes_ignorados", [])]
+        # Website form submissions arrive forwarded by a notification service, so
+        # the envelope sender is that service and not the client.
+        self.reenviadores = [s.lower() for s in recepcion.get("reenviadores", [])]
         self.acusar_cliente = bool(recepcion.get("acusar_recibo", True))
         self.avisar_cliente_asignado = bool(recepcion.get("avisar_asignacion", True))
+        self.carpeta_adjuntos = recepcion.get("carpeta_adjuntos", "data/adjuntos")
+
+        self.horario = VentanaDeEnvio(general.get("horario_envios", {}))
 
         despacho = config.get("despacho", {})
         self.reservar_inventario = bool(despacho.get("reservar_inventario", True))
@@ -154,7 +163,10 @@ class WorkflowRunner:
             return
 
         remitente = correo.remitente_email
-        if self._ignorado(remitente):
+        reenviado = self._es_reenviador(remitente)
+        # A forwarder is exempt from the noreply/automated filter: form
+        # notifications are automated by definition, and they carry real leads.
+        if not reenviado and self._ignorado(remitente):
             logger.info("Correo ignorado de %s (%s)", remitente, correo.asunto)
             return
 
@@ -165,7 +177,7 @@ class WorkflowRunner:
                 resumen["respuestas"] += 1
             return
 
-        if not self._remitente_permitido(remitente):
+        if not reenviado and not self._remitente_permitido(remitente):
             logger.info("Remitente no autorizado, se omite: %s", remitente)
             return
 
@@ -191,6 +203,7 @@ class WorkflowRunner:
             message_id=correo.message_id,
             **campos,
         )
+        trabajo.adjuntos = self._guardar_adjuntos(trabajo.id, correo.adjuntos)
         self.inventory.check(trabajo.items)
         self.store.add(trabajo)
         resumen["trabajos_nuevos"] += 1
@@ -214,6 +227,30 @@ class WorkflowRunner:
             )
             if enviado:
                 trabajo.acuse_cliente_at = utc_now()
+
+    def _guardar_adjuntos(self, job_id: str, adjuntos: list) -> list[str]:
+        """Save the client's photos under data/adjuntos/<folio>/ and return the paths."""
+        if not adjuntos:
+            return []
+
+        destino = Path(self.carpeta_adjuntos) / job_id
+        destino.mkdir(parents=True, exist_ok=True)
+        rutas: list[str] = []
+
+        for indice, adjunto in enumerate(adjuntos, start=1):
+            nombre = _nombre_seguro(adjunto.nombre) or f"adjunto-{indice}"
+            ruta = destino / f"{indice:02d}-{nombre}"
+            try:
+                ruta.write_bytes(adjunto.datos)
+            except OSError as e:
+                logger.error("No se pudo guardar el adjunto %s: %s", nombre, e)
+                continue
+            rutas.append(str(ruta))
+
+        if rutas:
+            logger.info("Trabajo %s: %d adjuntos guardados en %s",
+                        job_id, len(rutas), destino)
+        return rutas
 
     # --- step 2: WhatsApp answers -------------------------------------------
 
@@ -284,11 +321,22 @@ class WorkflowRunner:
         ahora = datetime.now(timezone.utc)
         carga = self.roster.carga_actual(list(self.store.trabajos.values()))
 
+        # Cold-calling workers at night is not acceptable; delivering a work
+        # order to somebody who already said yes is.
+        puede_convocar = self.horario.abierta(ahora)
+        if abiertos and not puede_convocar:
+            logger.info("Convocatorias en pausa: %s. Se reanudan el %s",
+                        self.horario.descripcion(ahora),
+                        self.horario.proxima_apertura(ahora).strftime("%a %d/%m %H:%M"))
+
         for trabajo in abiertos:
             self.attendance.expirar(trabajo, ahora)
 
             if trabajo.cupo_cubierto():
                 self._despachar(trabajo, resumen)
+                continue
+
+            if not puede_convocar:
                 continue
 
             enviadas = self._convocar(trabajo, carga)
@@ -374,11 +422,18 @@ class WorkflowRunner:
                                trabajo.id, detalle)
 
         confirmados = trabajo.confirmados()
+        asunto = f"[{trabajo.id}] Orden de trabajo confirmada"
         no_entregadas = []
         for convocatoria in confirmados:
             mensaje = self.messages.orden_trabajo(trabajo, convocatoria.nombre)
-            if not self._notificar(convocatoria.telefono, convocatoria.email,
-                                   f"[{trabajo.id}] Orden de trabajo confirmada", mensaje):
+            entregado = self._notificar(convocatoria.telefono, convocatoria.email,
+                                        asunto, mensaje)
+            # Photos cannot travel over a plain WhatsApp text, so when the client
+            # sent any, the crew also gets the order by email with them attached.
+            if trabajo.adjuntos and convocatoria.email:
+                entregado = self._enviar_email(convocatoria.email, asunto, mensaje,
+                                               adjuntos=trabajo.adjuntos) or entregado
+            if not entregado:
                 no_entregadas.append(convocatoria.nombre)
 
         if no_entregadas:
@@ -427,11 +482,14 @@ class WorkflowRunner:
         return resultado if devolver else resultado.ok
 
     def _enviar_email(self, destinatario: str, asunto: str, cuerpo: str,
-                      responder_a: str = "") -> bool:
+                      responder_a: str = "",
+                      adjuntos: Optional[list[str]] = None) -> bool:
         if self.dry_run:
-            logger.info("[DRY-RUN] Correo a %s | %s\n%s", destinatario, asunto, cuerpo)
+            logger.info("[DRY-RUN] Correo a %s | %s (%d adjuntos)\n%s",
+                        destinatario, asunto, len(adjuntos or []), cuerpo)
             return True
-        return self.email.send(destinatario, asunto, cuerpo, responder_a=responder_a)
+        return self.email.send(destinatario, asunto, cuerpo,
+                               responder_a=responder_a, adjuntos=adjuntos)
 
     def _alertar(self, mensaje: str) -> None:
         """Notify whoever supervises the workflow (optional)."""
@@ -451,6 +509,10 @@ class WorkflowRunner:
             return True
         return any(self._coincide(remitente, patron) for patron in self.remitentes_ignorados)
 
+    def _es_reenviador(self, remitente: str) -> bool:
+        """True for services that forward website form submissions to the mailbox."""
+        return any(self._coincide(remitente, patron) for patron in self.reenviadores)
+
     def _remitente_permitido(self, remitente: str) -> bool:
         if not self.remitentes_permitidos:
             return True   # empty allowlist = accept anyone
@@ -468,3 +530,10 @@ class WorkflowRunner:
         if "@" in patron:
             return remitente == patron
         return remitente.endswith("@" + patron)
+
+
+def _nombre_seguro(nombre: str) -> str:
+    """Sanitise an attachment filename: no paths, no surprises on disk."""
+    base = Path(nombre or "").name
+    limpio = re.sub(r"[^\w.\- ]", "_", base).strip(". ")
+    return limpio[:80]

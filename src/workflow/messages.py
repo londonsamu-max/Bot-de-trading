@@ -32,11 +32,13 @@ PLANTILLAS_POR_DEFECTO = {
     "orden_trabajo": (
         "CONFIRMADO - Orden de trabajo {job_id}\n\n"
         "Cliente: {cliente}\n"
+        "Teléfono del cliente: {telefono_cliente}\n"
         "Fecha: {fecha} {hora}\n"
         "Dirección: {direccion}\n"
         "Cuadrilla: {cuadrilla}\n\n"
         "Trabajo a realizar:\n{descripcion}\n\n"
         "Material asignado:\n{materiales}\n\n"
+        "Fotos del cliente: {adjuntos}\n\n"
         "Recoge el material antes de salir. Cualquier cambio avisa a {contacto}."
     ),
     "acuse_cliente": (
@@ -100,6 +102,8 @@ class MessageBuilder:
             "job_id": trabajo.id,
             "cliente": trabajo.cliente_nombre or trabajo.cliente_email or "cliente",
             "cliente_email": trabajo.cliente_email,
+            "telefono_cliente": trabajo.cliente_telefono or "no lo dejó",
+            "adjuntos": _formato_adjuntos(trabajo.adjuntos),
             "fecha": trabajo.fecha_servicio or "por confirmar",
             "hora": trabajo.hora_servicio,
             "direccion": trabajo.direccion or "por confirmar",
@@ -138,6 +142,15 @@ def formato_items(items: list) -> str:
             linea += f"  (FALTAN {_num(item.faltante)})"
         lineas.append(linea)
     return "\n".join(lineas)
+
+
+def _formato_adjuntos(adjuntos: list) -> str:
+    """Photos travel attached to the work-order email; WhatsApp only gets the count."""
+    if not adjuntos:
+        return "ninguna"
+    if len(adjuntos) == 1:
+        return "1 foto (va adjunta en el correo)"
+    return f"{len(adjuntos)} fotos (van adjuntas en el correo)"
 
 
 def _num(valor: float) -> str:

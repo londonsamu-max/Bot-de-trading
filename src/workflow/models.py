@@ -163,6 +163,7 @@ class Trabajo:
     id: str
     cliente_nombre: str = ""
     cliente_email: str = ""
+    cliente_telefono: str = ""
     asunto: str = ""
     descripcion: str = ""
     direccion: str = ""
@@ -175,6 +176,7 @@ class Trabajo:
     estado: str = EstadoTrabajo.NUEVO.value
     creado_at: str = field(default_factory=utc_now)
     message_id: str = ""
+    adjuntos: list[str] = field(default_factory=list)  # rutas de las fotos del cliente
     convocatorias: dict[str, Convocatoria] = field(default_factory=dict)
     inventario_reservado: bool = False
     orden_enviada_at: Optional[str] = None
@@ -207,6 +209,7 @@ class Trabajo:
             "id": self.id,
             "cliente_nombre": self.cliente_nombre,
             "cliente_email": self.cliente_email,
+            "cliente_telefono": self.cliente_telefono,
             "asunto": self.asunto,
             "descripcion": self.descripcion,
             "direccion": self.direccion,
@@ -219,6 +222,7 @@ class Trabajo:
             "estado": self.estado,
             "creado_at": self.creado_at,
             "message_id": self.message_id,
+            "adjuntos": self.adjuntos,
             "convocatorias": {k: v.to_dict() for k, v in self.convocatorias.items()},
             "inventario_reservado": self.inventario_reservado,
             "orden_enviada_at": self.orden_enviada_at,
@@ -232,6 +236,7 @@ class Trabajo:
             id=data["id"],
             cliente_nombre=data.get("cliente_nombre", ""),
             cliente_email=data.get("cliente_email", ""),
+            cliente_telefono=data.get("cliente_telefono", ""),
             asunto=data.get("asunto", ""),
             descripcion=data.get("descripcion", ""),
             direccion=data.get("direccion", ""),
@@ -244,6 +249,7 @@ class Trabajo:
             estado=data.get("estado", EstadoTrabajo.NUEVO.value),
             creado_at=data.get("creado_at", utc_now()),
             message_id=data.get("message_id", ""),
+            adjuntos=list(data.get("adjuntos", [])),
             convocatorias={k: Convocatoria.from_dict(v)
                            for k, v in data.get("convocatorias", {}).items()},
             inventario_reservado=bool(data.get("inventario_reservado", False)),

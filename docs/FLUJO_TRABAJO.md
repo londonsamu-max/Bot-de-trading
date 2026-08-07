@@ -7,10 +7,47 @@ material asignado y lo reserva del inventario.
 Es un módulo independiente del bot de trading: vive en `src/workflow/` y se
 ejecuta con `workflow.py`. No comparte nada con `main.py`.
 
+## De dónde llegan las solicitudes
+
+`jbrenovate.com` **no publica ninguna dirección de correo**. Los clientes
+contactan por dos vías, y las dos terminan en el buzón como un correo
+**reenviado por GoDaddy**, no escrito por el cliente:
+
+1. el formulario *"Drop us a line!"* (Name, Email, Phone, Attach Files),
+2. el sistema de *Bookings*.
+
+Esto importa mucho: el remitente de esos correos es un `noreply@` de GoDaddy, y
+el cliente real viene **dentro del cuerpo**. Por eso existe
+`recepcion.reenviadores` en `config/workflow.yaml`: los remitentes que estén ahí
+
+- **no** se descartan por el filtro de correos automáticos, y
+- se les saca del cuerpo el nombre, correo y teléfono reales del cliente, que es
+  a donde se manda el acuse de recibo.
+
+> **Ajusta esa lista con un correo real.** Puse los dominios habituales de
+> GoDaddy (`@godaddy.com`, `@secureserver.net`, `@email.godaddy.com`), pero el
+> remitente exacto solo se ve en un correo que ya te haya llegado. Si no
+> coincide, esas solicitudes se ignoran en silencio. Para comprobarlo:
+> `python workflow.py once --dry-run` y mira el log.
+
+Un correo del formulario se interpreta así:
+
+```
+Name: Sarah Miller            -> cliente
+Email: sarah.miller@gmail.com -> a quién se le responde (no a GoDaddy)
+Phone: (555) 987-6543         -> va en la orden de trabajo, para llamar al llegar
+Message: ...                  -> descripción del trabajo
+Attach Files                  -> las fotos se guardan y se mandan a la cuadrilla
+```
+
+Las etiquetas funcionan en español y en inglés (`Name`/`Nombre`,
+`Address`/`Dirección`, `Materials`/`Materiales`, `Message`/`Mensaje`...), porque
+el sitio está en inglés pero los mensajes al personal salen en español.
+
 ## Cómo funciona
 
 ```
-correo del cliente
+correo del cliente (o formulario del sitio, reenviado)
        |
        v
   [1] se lee la bandeja (IMAP) y se interpreta el correo
@@ -38,6 +75,28 @@ correo del cliente
 
 Cada ciclo es idempotente: si el proceso se cae a medias y vuelve a arrancar,
 no reenvía nada que ya haya salido.
+
+### Las fotos del cliente
+
+El formulario del sitio deja adjuntar archivos, y en remodelación la foto suele
+explicar el trabajo mejor que el texto. Se guardan en
+`data/adjuntos/<folio>/` y **viajan adjuntas en el correo de la orden de
+trabajo**, porque por WhatsApp de texto no se pueden mandar; el mensaje de
+WhatsApp solo dice cuántas fotos hay y que están en el correo.
+
+### Horario de envíos
+
+Las convocatorias llegan al celular personal de la gente, así que solo salen
+dentro de `general.horario_envios` (por defecto lun-vie 08:00-19:00, tomado del
+horario publicado en el sitio y ampliado un poco). Fuera de esa ventana el
+trabajo **espera**, no se da por perdido.
+
+Lo que **nunca** se retiene: la orden de trabajo a quien ya confirmó (está
+esperando los datos) y las alertas al supervisor.
+
+> **Revisa `zona_horaria`.** El sitio no publica dirección, así que dejé
+> `America/New_York` como valor por defecto. Si no es tu zona, cámbialo o los
+> mensajes saldrán a horas equivocadas.
 
 ## Puesta en marcha
 
@@ -192,6 +251,9 @@ En `config/workflow.yaml`:
 | Opción | Qué hace |
 |---|---|
 | `general.intervalo_segundos` | Cada cuánto se revisa la bandeja (300 = 5 min) |
+| `general.horario_envios.zona_horaria` | Tu zona horaria real (revísala) |
+| `general.horario_envios.inicio` / `.fin` / `.dias` | Ventana en que se puede molestar al personal |
+| `recepcion.reenviadores` | Remitentes que reenvían el formulario web (revísalo) |
 | `asistencia.recordatorio_minutos` | Cuánto se espera antes de insistir (60) |
 | `asistencia.expiracion_horas` | Cuándo se da por perdida una convocatoria (4) |
 | `asistencia.margen_convocatoria` | Cuánta gente extra se convoca por si alguien dice que no (1) |
@@ -216,7 +278,8 @@ El bot manda una alerta al supervisor (`alertas.email_supervisor` /
 python -m pytest tests/test_workflow.py -q
 ```
 
-62 pruebas que cubren el parser de correos, el inventario, la selección de
-trabajadores, la máquina de estados de asistencia y un ciclo completo de punta
-a punta con buzón y WhatsApp simulados. No tocan la red ni necesitan
+78 pruebas que cubren el parser de correos (incluido un formulario web
+reenviado por GoDaddy), el inventario, la selección de trabajadores, la máquina
+de estados de asistencia, los adjuntos, la ventana de envíos y un ciclo completo
+de punta a punta con buzón y WhatsApp simulados. No tocan la red ni necesitan
 credenciales.
