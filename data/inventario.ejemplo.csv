@@ -1,13 +1,21 @@
 sku,nombre,unidad,stock,reservado,minimo
 PIN-BLA-5,Pintura blanca 5 galones,cubeta,12,0,3
-PIN-GRI-5,Pintura gris 5 galones,cubeta,6,0,2
+PIN-FLAT-5,Pintura flat blanca 5 galones,cubeta,10,0,3
+PIN-TEC-5,Pintura de techo 5 galones,cubeta,6,0,2
 BRO-4,Brocha 4 pulgadas,pza,25,0,6
 ROD-9,Rodillo 9 pulgadas,pza,18,0,5
 CIN-AZU,Cinta de enmascarar azul,rollo,40,0,10
 PLA-DRO,Plastico para cubrir,rollo,15,0,4
 SEL-ACR,Sellador acrilico,tubo,30,0,8
 LIJ-120,Lija grano 120,pliego,60,0,15
-TOR-M8,Tornillo M8,pza,500,0,100
 DRY-12,Panel de drywall 1/2,pza,20,0,5
 COM-JUN,Compuesto para juntas,cubeta,10,0,3
+KIT-JANI,Kit de limpieza de unidad,kit,20,0,5
+DES-MUL,Desengrasante multiusos,galon,18,0,4
+TRA-BSA,Bolsas de basura,paquete,25,0,6
+CUB-ZAP,Cubre zapatos,par,200,0,50
+SHA-ALF,Shampoo para alfombra,galon,12,0,3
+DES-ALF,Desmanchador de alfombra,galon,8,0,2
+KIT-TINA,Kit de reacabado de tina,kit,6,0,2
+IMP-TINA,Imprimante para tina,galon,5,0,2
 ESC-6,Escalera 6 pies,pza,4,0,1

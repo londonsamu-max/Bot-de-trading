@@ -20,6 +20,11 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def strip_key(valor: str) -> str:
+    """Normalise a field for comparison: lowercase, no spaces, no punctuation."""
+    return "".join(c for c in (valor or "").lower() if c.isalnum())
+
+
 def parse_ts(value: Optional[str]) -> Optional[datetime]:
     """Parse an ISO-8601 timestamp written by `utc_now`. Returns None if unset/invalid."""
     if not value:
@@ -165,6 +170,16 @@ class Trabajo:
     cliente_email: str = ""
     cliente_telefono: str = ""
     asunto: str = ""
+
+    # Columnas del control de trabajos: un renglón = una unidad de un complejo.
+    empresa_gestion: str = ""      # Mgmt CO.        (shea, udr...)
+    propiedad: str = ""            # Property Name   (Park Mesa Villas, Reata...)
+    unidad: str = ""               # Unit            (B109, Q-106, 210...)
+    tamano: str = ""               # Size            (1+1, 3+2...)
+    servicio: str = ""             # Service         (paint, jani, carpet, tub)
+    descripcion_servicio: str = ""  # Service Description ("full tub", "cc pm")
+    turno: str = ""                # AM / PM
+    ocupada: bool = False          # occupied vs vacant
     descripcion: str = ""
     direccion: str = ""
     zona: str = ""
@@ -202,6 +217,20 @@ class Trabajo:
     def agregar_nota(self, texto: str) -> None:
         self.notas.append(f"{utc_now()} {texto}")
 
+    def clave_unidad(self) -> str:
+        """Identity of the work itself, used to catch a re-sent unit list."""
+        return "|".join([
+            strip_key(self.propiedad), strip_key(self.unidad),
+            strip_key(self.servicio), self.fecha_servicio,
+        ])
+
+    def etiqueta(self) -> str:
+        """Short human label: 'Park Mesa Villas B109 (paint)'."""
+        partes = [p for p in (self.propiedad, self.unidad) if p]
+        if self.servicio:
+            partes.append(f"({self.servicio})")
+        return " ".join(partes) or self.cliente_nombre or self.id
+
     # --- serialization ------------------------------------------------------
 
     def to_dict(self) -> dict:
@@ -211,6 +240,14 @@ class Trabajo:
             "cliente_email": self.cliente_email,
             "cliente_telefono": self.cliente_telefono,
             "asunto": self.asunto,
+            "empresa_gestion": self.empresa_gestion,
+            "propiedad": self.propiedad,
+            "unidad": self.unidad,
+            "tamano": self.tamano,
+            "servicio": self.servicio,
+            "descripcion_servicio": self.descripcion_servicio,
+            "turno": self.turno,
+            "ocupada": self.ocupada,
             "descripcion": self.descripcion,
             "direccion": self.direccion,
             "zona": self.zona,
@@ -238,6 +275,14 @@ class Trabajo:
             cliente_email=data.get("cliente_email", ""),
             cliente_telefono=data.get("cliente_telefono", ""),
             asunto=data.get("asunto", ""),
+            empresa_gestion=data.get("empresa_gestion", ""),
+            propiedad=data.get("propiedad", ""),
+            unidad=data.get("unidad", ""),
+            tamano=data.get("tamano", ""),
+            servicio=data.get("servicio", ""),
+            descripcion_servicio=data.get("descripcion_servicio", ""),
+            turno=data.get("turno", ""),
+            ocupada=bool(data.get("ocupada", False)),
             descripcion=data.get("descripcion", ""),
             direccion=data.get("direccion", ""),
             zona=data.get("zona", ""),

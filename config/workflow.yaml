@@ -22,8 +22,12 @@ general:
 rutas:
   inventario: "data/inventario.csv"
   trabajadores: "data/trabajadores.csv"
+  propiedades: "data/propiedades.csv"   # empresas de gestión y complejos
+  unidades: "data/unidades.csv"         # tamaño de cada apartamento (1+1, 3+2)
+  consumos: "data/consumos.csv"         # material por servicio y tamaño
   estado: "data/workflow_state.json"
   whatsapp_inbox: "data/whatsapp_inbox.jsonl"
+  exportacion: "data/control_trabajos.csv"
 
 email:
   # Google Workspace: imap.gmail.com / smtp.gmail.com (usa contraseña de aplicación)
@@ -87,15 +91,43 @@ recepcion:
 parser:
   trabajadores_por_defecto: 1  # si el correo no dice cuántos se necesitan
   max_items: 50
+  max_unidades_por_correo: 60
+
+  # Las empresas de gestión escriben fechas al estilo de EE.UU.: 8/10/26 es el
+  # 10 de agosto, no el 8 de octubre. Cámbialo a "EU" si alguna escribe d/m/a.
+  formato_fecha: "US"
+
   # Etiquetas adicionales que usen tus clientes, además de las que ya reconoce
   etiquetas_extra:
     direccion: ["job site", "jobsite", "property"]
     items: ["lista de material", "material list"]
 
+  # Palabras que identifican cada servicio en el renglón de la unidad.
+  # Se suman a las que ya reconoce (paint, jani, carpet, tub).
+  servicios_extra:
+    paint: ["touch up", "touchup"]
+    jani: ["make ready", "turnover"]
+    carpet: ["shampoo"]
+
+# Qué habilidad de data/trabajadores.csv se necesita para cada servicio.
+servicios:
+  habilidades:
+    paint: ["pintura"]
+    jani: ["limpieza"]
+    carpet: ["alfombra"]
+    tub: ["tinas"]
+    otro: []
+
 asistencia:
   recordatorio_minutos: 60     # recordatorio si no responden en 1 hora
   expiracion_horas: 4          # después de 4 horas la convocatoria expira
   margen_convocatoria: 1       # se convoca a 1 persona extra por si alguien dice NO
+
+  # Cuántas unidades puede tomar una persona EL MISMO DÍA. Sin este tope, cuando
+  # una empresa manda 6 unidades juntas se las lleva todas quien esté más cerca.
+  # Si todos llegan al tope se asigna de todos modos (mejor eso que perder la
+  # unidad) y queda avisado en el log.
+  max_trabajos_por_dia: 2
 
 despacho:
   reservar_inventario: true    # descuenta el material del disponible al asignar

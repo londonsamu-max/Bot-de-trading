@@ -13,6 +13,7 @@ Uso:
     python workflow.py webhook --puerto 8080   # recibe respuestas de WhatsApp
     python workflow.py inventario              # muestra existencias y faltantes
     python workflow.py completar JB-...        # cierra el trabajo y descuenta material
+    python workflow.py exportar --ver          # control de trabajos para Excel
 """
 
 import argparse
@@ -60,6 +61,9 @@ def cmd_init(args, config: dict) -> int:
     for destino_key, ejemplo in (
         ("inventario", "data/inventario.ejemplo.csv"),
         ("trabajadores", "data/trabajadores.ejemplo.csv"),
+        ("propiedades", "data/propiedades.ejemplo.csv"),
+        ("unidades", "data/unidades.ejemplo.csv"),
+        ("consumos", "data/consumos.ejemplo.csv"),
     ):
         destino = Path(rutas.get(destino_key, f"data/{destino_key}.csv"))
         if destino.exists():
@@ -73,9 +77,14 @@ def cmd_init(args, config: dict) -> int:
         print(f"  creado: {destino}")
 
     print("\nListo. Ahora:")
-    print("  1. Edita data/inventario.csv y data/trabajadores.csv con tus datos reales.")
-    print("  2. Copia .env.example a .env y llena las credenciales del correo.")
-    print("  3. Corre: python workflow.py check")
+    print("  1. data/propiedades.csv  -> tus empresas de gestión y sus complejos")
+    print("     (el 'dominio' o 'contacto' es lo que identifica de quién es el correo)")
+    print("  2. data/trabajadores.csv -> tu personal, con habilidades y teléfono")
+    print("  3. data/inventario.csv   -> tus existencias")
+    print("  4. data/unidades.csv     -> tamaño de cada apartamento (1+1, 3+2)")
+    print("  5. data/consumos.csv     -> material que se lleva por servicio y tamaño")
+    print("  6. Copia .env.example a .env y llena las credenciales del correo.")
+    print("  7. Corre: python workflow.py check")
     return 0
 
 
@@ -145,22 +154,29 @@ def cmd_estado(args, config: dict) -> int:
         print("No hay trabajos que mostrar.")
         return 0
 
-    trabajos.sort(key=lambda t: t.creado_at, reverse=True)
-    print(f"{'FOLIO':<18} {'ESTADO':<14} {'CONF':>6}  CLIENTE / FECHA")
-    print("-" * 78)
+    trabajos.sort(key=lambda t: (t.fecha_servicio or "9999", t.propiedad, t.unidad))
+    print(f"{'FOLIO':<18} {'ESTADO':<13} {'CONF':>5}  {'FECHA':<11} "
+          f"{'SERVICIO':<8} TRABAJO")
+    print("-" * 92)
     for trabajo in trabajos:
         conf = f"{len(trabajo.confirmados())}/{trabajo.trabajadores_requeridos}"
-        print(f"{trabajo.id:<18} {trabajo.estado:<14} {conf:>6}  "
-              f"{(trabajo.cliente_nombre or trabajo.cliente_email)[:30]} "
-              f"{trabajo.fecha_servicio} {trabajo.hora_servicio}")
+        print(f"{trabajo.id:<18} {trabajo.estado:<13} {conf:>5}  "
+              f"{(trabajo.fecha_servicio or '-'):<11} "
+              f"{(trabajo.servicio or '-'):<8} {trabajo.etiqueta()[:38]}")
     return 0
 
 
 def _imprimir_detalle(trabajo) -> None:
     print(f"Folio:        {trabajo.id}")
     print(f"Estado:       {trabajo.estado}")
+    print(f"Empresa:      {trabajo.empresa_gestion or '-'}")
+    print(f"Propiedad:    {trabajo.propiedad or '-'}")
+    print(f"Unidad:       {trabajo.unidad or '-'}  "
+          f"({trabajo.tamano or 'tamaño desconocido'}, "
+          f"{'ocupada' if trabajo.ocupada else 'vacante'})")
+    print(f"Servicio:     {trabajo.servicio or '-'} - {trabajo.descripcion_servicio}")
     print(f"Cliente:      {trabajo.cliente_nombre} <{trabajo.cliente_email}>")
-    print(f"Fecha:        {trabajo.fecha_servicio} {trabajo.hora_servicio}")
+    print(f"Fecha:        {trabajo.fecha_servicio} {trabajo.turno or trabajo.hora_servicio}")
     print(f"Dirección:    {trabajo.direccion}")
     print(f"Habilidades:  {', '.join(trabajo.habilidades) or 'cualquiera'}")
     print(f"Requeridos:   {trabajo.trabajadores_requeridos}")
@@ -224,22 +240,17 @@ def cmd_simular(args, config: dict) -> int:
 
     cuerpo = ruta.read_text(encoding="utf-8")
     runner = WorkflowRunner(config, dry_run=not args.enviar)
-    campos = runner.parser.parse(args.asunto, cuerpo,
-                                 remitente_email=args.de, remitente_nombre="")
-    runner.inventory.check(campos["items"])
 
-    print("Interpretación del correo:")
-    for clave, valor in campos.items():
-        if clave == "items":
-            print("  materiales:")
-            for item in valor:
-                estado = "OK" if item.faltante == 0 else f"FALTAN {item.faltante}"
-                print(f"    - {item}  [{item.sku or 'sin sku'}: {estado}]")
-        else:
-            print(f"  {clave}: {valor}")
+    # Un correo de empresa de gestión se lee renglón por renglón, no como una
+    # sola solicitud, así que la vista previa tiene que mostrarlo igual.
+    propiedad = runner.propiedades.match(args.de, cuerpo, args.asunto)
+    if propiedad:
+        _previsualizar_unidades(runner, propiedad, cuerpo)
+    else:
+        _previsualizar_solicitud(runner, args, cuerpo)
 
     if not args.crear:
-        print("\n(No se creó el trabajo. Usa --crear para registrarlo de verdad.)")
+        print("\n(No se creó nada. Usa --crear para registrarlo de verdad.)")
         return 0
 
     from src.workflow.email_client import CorreoEntrante
@@ -253,8 +264,55 @@ def cmd_simular(args, config: dict) -> int:
     runner._atender_trabajos({"convocatorias_enviadas": 0, "recordatorios": 0,
                               "trabajos_asignados": 0, "trabajos_sin_personal": 0})
     runner.store.save()
-    print(f"\nTrabajo creado y convocatorias {'enviadas' if args.enviar else 'simuladas'}.")
+    print(f"\n{resumen['trabajos_nuevos']} trabajos creados y convocatorias "
+          f"{'enviadas' if args.enviar else 'simuladas'}.")
     return 0
+
+
+def _previsualizar_unidades(runner, propiedad, cuerpo: str) -> None:
+    """Preview of a management-company email: one row per unit."""
+    unidades = runner.property_parser.parse(cuerpo)
+    print(f"Empresa de gestión: {propiedad.empresa_gestion or '(sin definir)'}")
+    print(f"Propiedad:          {propiedad.propiedad}")
+    print(f"Unidades detectadas: {len(unidades)}\n")
+
+    if not unidades:
+        print("  Ningún renglón parece una unidad. Revisa el correo a mano.")
+        return
+
+    print(f"{'UNIDAD':<12} {'SERVICIO':<9} {'FECHA':<11} {'TURNO':<6} "
+          f"{'TAMAÑO':<7} DESCRIPCIÓN / MATERIAL")
+    print("-" * 96)
+    for unidad in unidades:
+        tamano = unidad.tamano or runner.tamanos.get(propiedad.propiedad, unidad.unidad)
+        items = runner.consumos.para(unidad.servicio, tamano)
+        runner.inventory.check(items)
+        material = ", ".join(
+            f"{i.sku} x{i.cantidad:g}" + ("!" if i.faltante else "") for i in items
+        ) or "(sin regla en consumos.csv)"
+        print(f"{unidad.unidad:<12} {unidad.servicio:<9} "
+              f"{(unidad.fecha or '-'):<11} {(unidad.turno or '-'):<6} "
+              f"{(tamano or '?'):<7} {unidad.descripcion} | {material}")
+    print("\n! = no alcanza el inventario")
+
+
+def _previsualizar_solicitud(runner, args, cuerpo: str) -> None:
+    """Preview of a one-off request (website form or direct client)."""
+    campos = runner.parser.parse(args.asunto, cuerpo,
+                                 remitente_email=args.de, remitente_nombre="")
+    runner.inventory.check(campos["items"])
+
+    print("Remitente no reconocido como empresa de gestión; "
+          "se interpreta como solicitud suelta.\n")
+    print("Interpretación del correo:")
+    for clave, valor in campos.items():
+        if clave == "items":
+            print("  materiales:")
+            for item in valor:
+                estado = "OK" if item.faltante == 0 else f"FALTAN {item.faltante}"
+                print(f"    - {item}  [{item.sku or 'sin sku'}: {estado}]")
+        else:
+            print(f"  {clave}: {valor}")
 
 
 def cmd_webhook(args, config: dict) -> int:
@@ -288,6 +346,29 @@ def cmd_inventario(args, config: dict) -> int:
         print(f"{articulo.sku:<14} {articulo.nombre[:34]:<34} {articulo.unidad:<8} "
               f"{articulo.stock:>7g} {articulo.reservado:>7g} {articulo.disponible:>7g}{marca}")
     print("\n! = en o por debajo del mínimo")
+    return 0
+
+
+def cmd_exportar(args, config: dict) -> int:
+    """Export jobs with the columns of the tracking spreadsheet."""
+    from src.workflow import export
+
+    rutas = config.get("rutas", {})
+    store = WorkflowStore(rutas.get("estado", "data/workflow_state.json"))
+    trabajos = export.seleccionar(
+        store.trabajos.values(),
+        desde=args.desde or "", hasta=args.hasta or "",
+        solo_asignados=args.solo_asignados,
+    )
+
+    if args.ver:
+        print(export.tabla_texto(trabajos))
+        return 0
+
+    destino = args.salida or rutas.get("exportacion", "data/control_trabajos.csv")
+    filas = export.escribir_csv(trabajos, destino, incluir_extra=args.detalle)
+    print(f"{filas} filas exportadas a {destino}")
+    print("Se abre en Excel y las columnas van en el mismo orden que tu hoja.")
     return 0
 
 
@@ -369,6 +450,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_comp = sub.add_parser("completar", help="cierra un trabajo y descuenta el material")
     p_comp.add_argument("job", help="folio del trabajo")
 
+    p_exp = sub.add_parser("exportar", help="genera el control de trabajos para Excel")
+    p_exp.add_argument("--desde", help="fecha de servicio mínima (AAAA-MM-DD)")
+    p_exp.add_argument("--hasta", help="fecha de servicio máxima (AAAA-MM-DD)")
+    p_exp.add_argument("--salida", help="archivo CSV de salida")
+    p_exp.add_argument("--solo-asignados", action="store_true",
+                       help="solo los que ya tienen personal confirmado")
+    p_exp.add_argument("--detalle", action="store_true",
+                       help="agrega folio, estado, turno y material")
+    p_exp.add_argument("--ver", action="store_true",
+                       help="muestra la tabla en pantalla en vez de escribir el archivo")
+
     return parser
 
 
@@ -383,6 +475,7 @@ COMANDOS = {
     "webhook": cmd_webhook,
     "inventario": cmd_inventario,
     "completar": cmd_completar,
+    "exportar": cmd_exportar,
 }
 
 

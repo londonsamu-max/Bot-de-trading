@@ -114,11 +114,16 @@ class WorkerRoster:
 
     def seleccionar(self, trabajo: Trabajo, cantidad: int,
                     excluir: Optional[set[str]] = None,
-                    carga: Optional[dict[str, int]] = None) -> list[Trabajador]:
+                    carga: Optional[dict[str, int]] = None,
+                    max_por_dia: int = 0) -> list[Trabajador]:
         """Pick the best `cantidad` candidates for a job.
 
         Ranking: skills matched first, then same zone, then lightest workload,
         then name for a stable, predictable order.
+
+        `max_por_dia` caps how many units one person can take on the job's date.
+        A single painter cannot turn over six apartments in a morning, and
+        without the cap the nearest worker absorbs the whole email.
         """
         excluir = excluir or set()
         carga = carga or {}
@@ -142,6 +147,18 @@ class WorkerRoster:
                     "se convoca con cobertura parcial", trabajo.habilidades, trabajo.id
                 )
 
+        if max_por_dia > 0:
+            disponibles = [t for t in candidatos if carga.get(t.id, 0) < max_por_dia]
+            if disponibles:
+                candidatos = disponibles
+            elif candidatos:
+                # Everybody is at the cap. Leaving the unit unstaffed is worse
+                # than a visible overload, so assign anyway and say so.
+                logger.warning(
+                    "Todos los candidatos de %s ya tienen %d trabajos el %s; "
+                    "se asigna por encima del tope",
+                    trabajo.id, max_por_dia, trabajo.fecha_servicio or "sin fecha")
+
         candidatos.sort(key=lambda t: (
             0 if (zona_trabajo and strip_accents(t.zona) == zona_trabajo) else 1,
             carga.get(t.id, 0),
@@ -149,10 +166,17 @@ class WorkerRoster:
         ))
         return candidatos[:cantidad]
 
-    def carga_actual(self, trabajos: list[Trabajo]) -> dict[str, int]:
-        """Count active assignments per worker, to spread the work around."""
+    def carga_actual(self, trabajos: list[Trabajo],
+                     fecha: Optional[str] = None) -> dict[str, int]:
+        """Count active assignments per worker.
+
+        With `fecha`, only jobs scheduled that day are counted: what matters is
+        how full someone's Tuesday is, not how many jobs they have all month.
+        """
         carga: dict[str, int] = {}
         for trabajo in trabajos:
+            if fecha is not None and trabajo.fecha_servicio != fecha:
+                continue
             for convocatoria in trabajo.convocatorias.values():
                 if convocatoria.estado in ("pendiente", "confirmado"):
                     carga[convocatoria.trabajador_id] = \

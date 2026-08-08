@@ -18,10 +18,10 @@ PLANTILLAS_POR_DEFECTO = {
     "convocatoria": (
         "Hola {trabajador}, hay trabajo disponible.\n\n"
         "Folio: {job_id}\n"
-        "Cliente: {cliente}\n"
-        "Fecha: {fecha} {hora}\n"
+        "Propiedad: {propiedad}  |  Unidad: {unidad} ({tamano})\n"
+        "Servicio: {servicio} - {descripcion_servicio}\n"
+        "Fecha: {fecha} {turno}\n"
         "Dirección: {direccion}\n\n"
-        "Trabajo:\n{descripcion}\n\n"
         "Material que se entrega:\n{materiales}\n\n"
         "¿Puedes asistir? Responde SI o NO a este mensaje."
     ),
@@ -31,12 +31,12 @@ PLANTILLAS_POR_DEFECTO = {
     ),
     "orden_trabajo": (
         "CONFIRMADO - Orden de trabajo {job_id}\n\n"
-        "Cliente: {cliente}\n"
-        "Teléfono del cliente: {telefono_cliente}\n"
-        "Fecha: {fecha} {hora}\n"
+        "Propiedad: {propiedad} ({empresa_gestion})\n"
+        "Unidad: {unidad}  |  Tamaño: {tamano}  |  {ocupacion}\n"
+        "Servicio: {servicio} - {descripcion_servicio}\n"
+        "Fecha: {fecha} {turno}\n"
         "Dirección: {direccion}\n"
         "Cuadrilla: {cuadrilla}\n\n"
-        "Trabajo a realizar:\n{descripcion}\n\n"
         "Material asignado:\n{materiales}\n\n"
         "Fotos del cliente: {adjuntos}\n\n"
         "Recoge el material antes de salir. Cualquier cambio avisa a {contacto}."
@@ -104,6 +104,14 @@ class MessageBuilder:
             "cliente_email": trabajo.cliente_email,
             "telefono_cliente": trabajo.cliente_telefono or "no lo dejó",
             "adjuntos": _formato_adjuntos(trabajo.adjuntos),
+            "empresa_gestion": trabajo.empresa_gestion or "sin empresa",
+            "propiedad": trabajo.propiedad or trabajo.cliente_nombre or "sin propiedad",
+            "unidad": trabajo.unidad or "sin unidad",
+            "tamano": trabajo.tamano or "tamaño por confirmar",
+            "servicio": trabajo.servicio or "servicio general",
+            "descripcion_servicio": trabajo.descripcion_servicio or trabajo.descripcion,
+            "turno": trabajo.turno or trabajo.hora_servicio,
+            "ocupacion": "OCUPADA (avisar al residente)" if trabajo.ocupada else "vacante",
             "fecha": trabajo.fecha_servicio or "por confirmar",
             "hora": trabajo.hora_servicio,
             "direccion": trabajo.direccion or "por confirmar",

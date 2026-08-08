@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.workflow.attendance import AttendanceManager
+from src.workflow.catalogs import PropertyDirectory, ServiceMaterials, UnitSizes
 from src.workflow.config import validate_config
 from src.workflow.email_client import CorreoEntrante, EmailClient
 from src.workflow.inbox import WhatsAppInbox
@@ -35,6 +36,7 @@ from src.workflow.models import (
 )
 from src.workflow.notifier import Notifier, ResultadoEnvio, build_whatsapp_notifier
 from src.workflow.parser import EmailJobParser, extract_job_id, parse_answer, strip_accents
+from src.workflow.property_parser import PropertyEmailParser
 from src.workflow.schedule import VentanaDeEnvio
 from src.workflow.store import WorkflowStore
 from src.workflow.workers import WorkerRoster
@@ -69,7 +71,17 @@ class WorkflowRunner:
             email_respaldo=bool(config.get("whatsapp", {}).get("respaldo_email", True)),
         )
         self.parser = EmailJobParser(config.get("parser", {}))
+        self.property_parser = PropertyEmailParser(config.get("parser", {}))
+        self.propiedades = PropertyDirectory(rutas.get("propiedades", "data/propiedades.csv"))
+        self.tamanos = UnitSizes(rutas.get("unidades", "data/unidades.csv"))
+        self.consumos = ServiceMaterials(rutas.get("consumos", "data/consumos.csv"))
+        self.habilidades_por_servicio = {
+            str(k).lower(): list(v)
+            for k, v in (config.get("servicios", {}).get("habilidades") or {}).items()
+        }
         self.attendance = AttendanceManager(config.get("asistencia", {}))
+        self.max_trabajos_por_dia = int(
+            config.get("asistencia", {}).get("max_trabajos_por_dia", 2))
         self.messages = MessageBuilder(
             config.get("mensajes", {}),
             empresa=self.empresa,
@@ -163,10 +175,11 @@ class WorkflowRunner:
             return
 
         remitente = correo.remitente_email
-        reenviado = self._es_reenviador(remitente)
-        # A forwarder is exempt from the noreply/automated filter: form
-        # notifications are automated by definition, and they carry real leads.
-        if not reenviado and self._ignorado(remitente):
+        # Management companies and form forwarders are known clients: they skip
+        # the automated-sender filter and the allowlist.
+        conocido = self._es_reenviador(remitente) or self.propiedades.conocido(remitente)
+        reenviado = conocido
+        if not conocido and self._ignorado(remitente):
             logger.info("Correo ignorado de %s (%s)", remitente, correo.asunto)
             return
 
@@ -193,6 +206,132 @@ class WorkflowRunner:
         self._crear_trabajo(correo, resumen)
 
     def _crear_trabajo(self, correo: CorreoEntrante, resumen: dict) -> None:
+        """Route the email to the right parser and register the resulting jobs."""
+        propiedad = self.propiedades.match(correo.remitente_email, correo.cuerpo,
+                                           correo.asunto)
+        if propiedad:
+            self._crear_trabajos_por_unidad(correo, propiedad, resumen)
+            return
+        self._crear_trabajo_suelto(correo, resumen)
+
+    def _crear_trabajos_por_unidad(self, correo: CorreoEntrante,
+                                   propiedad, resumen: dict) -> None:
+        """A management-company email: every unit line becomes its own job."""
+        unidades = self.property_parser.parse(correo.cuerpo)
+        if not unidades:
+            logger.warning("Correo de %s (%s) sin unidades reconocibles; "
+                           "se registra como solicitud suelta",
+                           propiedad.propiedad, correo.remitente_email)
+            self._crear_trabajo_suelto(correo, resumen, propiedad=propiedad)
+            return
+
+        adjuntos = self._guardar_adjuntos(f"correo-{_slug(correo.message_id)}",
+                                          correo.adjuntos)
+        creados: list[Trabajo] = []
+
+        for unidad in unidades:
+            tamano = unidad.tamano or self.tamanos.get(propiedad.propiedad, unidad.unidad)
+            trabajo = Trabajo(
+                id=self.store.next_job_id(date.today().strftime("%Y%m%d")),
+                message_id=correo.message_id,
+                cliente_nombre=propiedad.propiedad,
+                cliente_email=correo.remitente_email,
+                asunto=correo.asunto,
+                empresa_gestion=propiedad.empresa_gestion,
+                propiedad=propiedad.propiedad,
+                unidad=unidad.unidad,
+                tamano=tamano,
+                servicio=unidad.servicio,
+                descripcion_servicio=unidad.descripcion,
+                turno=unidad.turno,
+                ocupada=unidad.ocupada,
+                descripcion=unidad.linea,
+                direccion=propiedad.direccion,
+                zona=propiedad.zona,
+                fecha_servicio=unidad.fecha,
+                habilidades=self._habilidades(unidad.servicio),
+                items=self.consumos.para(unidad.servicio, tamano),
+                adjuntos=adjuntos,
+            )
+
+            duplicado = self._buscar_duplicado(trabajo)
+            if duplicado:
+                logger.info("Unidad repetida, ya existe %s para %s",
+                            duplicado.id, trabajo.etiqueta())
+                duplicado.agregar_nota(f"La empresa reenvió esta unidad ({correo.asunto})")
+                continue
+
+            if not trabajo.tamano:
+                trabajo.agregar_nota("Sin tamaño conocido: revisa data/unidades.csv")
+            if not trabajo.items:
+                trabajo.agregar_nota(
+                    f"Sin material asignado para el servicio '{unidad.servicio}': "
+                    f"revisa data/consumos.csv")
+
+            self.inventory.check(trabajo.items)
+            self.store.add(trabajo)
+            creados.append(trabajo)
+            resumen["trabajos_nuevos"] += 1
+
+        if not creados:
+            return
+
+        logger.info("Correo de %s: %d unidades -> %d trabajos (%s)",
+                    propiedad.propiedad, len(unidades), len(creados),
+                    ", ".join(t.unidad for t in creados))
+        self._avisar_faltantes(creados)
+        self._acusar_recibo_lote(correo, propiedad, creados)
+
+    def _buscar_duplicado(self, trabajo: Trabajo) -> Optional[Trabajo]:
+        """Same property + unit + service + date already open = a re-sent list."""
+        clave = trabajo.clave_unidad()
+        for existente in self.store.trabajos.values():
+            if existente.estado in (EstadoTrabajo.CANCELADO.value,
+                                    EstadoTrabajo.COMPLETADO.value):
+                continue
+            if existente.clave_unidad() == clave:
+                return existente
+        return None
+
+    def _habilidades(self, servicio: str) -> list[str]:
+        """Map a service to the skills listed in trabajadores.csv."""
+        return list(self.habilidades_por_servicio.get((servicio or "").lower(), []))
+
+    def _avisar_faltantes(self, trabajos: list[Trabajo]) -> None:
+        """One alert for the whole email instead of one per unit."""
+        con_faltante = [t for t in trabajos if t.faltantes_inventario()]
+        if not con_faltante:
+            return
+        detalle = "\n".join(
+            f"- {t.etiqueta()} ({t.id}): " +
+            ", ".join(f"{i.descripcion} faltan {i.faltante:g}"
+                      for i in t.faltantes_inventario())
+            for t in con_faltante
+        )
+        self._alertar(f"Falta material para {len(con_faltante)} unidades:\n{detalle}")
+
+    def _acusar_recibo_lote(self, correo: CorreoEntrante, propiedad,
+                            trabajos: list[Trabajo]) -> None:
+        if not self.acusar_cliente or not correo.remitente_email:
+            return
+        lineas = "\n".join(
+            f"- {t.unidad} ({t.servicio}) {t.fecha_servicio or 'sin fecha'} "
+            f"{t.turno} -> folio {t.id}".rstrip()
+            for t in trabajos
+        )
+        cuerpo = (f"Hola,\n\nRecibimos su solicitud para {propiedad.propiedad} "
+                  f"y registramos {len(trabajos)} unidades:\n\n{lineas}\n\n"
+                  f"Ya estamos asignando al personal y les confirmamos.\n\n"
+                  f"Saludos,\n{self.empresa}")
+        if self._enviar_email(correo.remitente_email,
+                              f"Recibido: {len(trabajos)} unidades - {propiedad.propiedad}",
+                              cuerpo, responder_a=correo.message_id):
+            for trabajo in trabajos:
+                trabajo.acuse_cliente_at = utc_now()
+
+    def _crear_trabajo_suelto(self, correo: CorreoEntrante, resumen: dict,
+                              propiedad=None) -> None:
+        """One-off request (website form, direct client): a single job."""
         campos = self.parser.parse(
             correo.asunto, correo.cuerpo,
             remitente_nombre=correo.remitente_nombre,
@@ -203,6 +342,17 @@ class WorkflowRunner:
             message_id=correo.message_id,
             **campos,
         )
+        if propiedad:
+            # Known management company, but the email had no parseable unit list.
+            trabajo.empresa_gestion = propiedad.empresa_gestion
+            trabajo.propiedad = propiedad.propiedad
+            trabajo.cliente_nombre = trabajo.cliente_nombre or propiedad.propiedad
+            trabajo.direccion = trabajo.direccion or propiedad.direccion
+            trabajo.zona = trabajo.zona or propiedad.zona
+            trabajo.agregar_nota("No se reconocieron unidades; revísalo a mano")
+            self._alertar(f"Correo de {propiedad.propiedad} sin unidades reconocibles "
+                          f"({trabajo.id}). Hay que capturarlo a mano.")
+
         trabajo.adjuntos = self._guardar_adjuntos(trabajo.id, correo.adjuntos)
         self.inventory.check(trabajo.items)
         self.store.add(trabajo)
@@ -319,7 +469,7 @@ class WorkflowRunner:
         abiertos = self.store.by_estado(EstadoTrabajo.NUEVO.value,
                                         EstadoTrabajo.CONVOCANDO.value)
         ahora = datetime.now(timezone.utc)
-        carga = self.roster.carga_actual(list(self.store.trabajos.values()))
+        todos = list(self.store.trabajos.values())
 
         # Cold-calling workers at night is not acceptable; delivering a work
         # order to somebody who already said yes is.
@@ -339,6 +489,9 @@ class WorkflowRunner:
             if not puede_convocar:
                 continue
 
+            # Load is counted per service date: a full Tuesday says nothing
+            # about whether somebody can take a unit on Thursday.
+            carga = self.roster.carga_actual(todos, fecha=trabajo.fecha_servicio)
             enviadas = self._convocar(trabajo, carga)
             resumen["convocatorias_enviadas"] += enviadas
 
@@ -364,7 +517,8 @@ class WorkflowRunner:
             return 0
 
         candidatos = self.roster.seleccionar(
-            trabajo, cantidad, excluir=set(trabajo.convocatorias), carga=carga
+            trabajo, cantidad, excluir=set(trabajo.convocatorias), carga=carga,
+            max_por_dia=self.max_trabajos_por_dia,
         )
         if not candidatos:
             logger.warning("No hay trabajadores disponibles para %s (habilidades: %s)",
@@ -530,6 +684,12 @@ class WorkflowRunner:
         if "@" in patron:
             return remitente == patron
         return remitente.endswith("@" + patron)
+
+
+def _slug(texto: str) -> str:
+    """Turn a Message-ID into something usable as a folder name."""
+    limpio = re.sub(r"[^\w.-]", "-", (texto or "").strip("<>"))
+    return limpio.strip("-")[:60] or "sin-id"
 
 
 def _nombre_seguro(nombre: str) -> str:

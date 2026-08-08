@@ -9,57 +9,79 @@ ejecuta con `workflow.py`. No comparte nada con `main.py`.
 
 ## De dónde llegan las solicitudes
 
-`jbrenovate.com` **no publica ninguna dirección de correo**. Los clientes
-contactan por dos vías, y las dos terminan en el buzón como un correo
-**reenviado por GoDaddy**, no escrito por el cliente:
-
-1. el formulario *"Drop us a line!"* (Name, Email, Phone, Attach Files),
-2. el sistema de *Bookings*.
-
-Esto importa mucho: el remitente de esos correos es un `noreply@` de GoDaddy, y
-el cliente real viene **dentro del cuerpo**. Por eso existe
-`recepcion.reenviadores` en `config/workflow.yaml`: los remitentes que estén ahí
-
-- **no** se descartan por el filtro de correos automáticos, y
-- se les saca del cuerpo el nombre, correo y teléfono reales del cliente, que es
-  a donde se manda el acuse de recibo.
-
-> **Ajusta esa lista con un correo real.** Puse los dominios habituales de
-> GoDaddy (`@godaddy.com`, `@secureserver.net`, `@email.godaddy.com`), pero el
-> remitente exacto solo se ve en un correo que ya te haya llegado. Si no
-> coincide, esas solicitudes se ignoran en silencio. Para comprobarlo:
-> `python workflow.py once --dry-run` y mira el log.
-
-Un correo del formulario se interpreta así:
+**El canal principal son las empresas de gestión de apartamentos.** Escriben
+directo a `Workorder@jbrenovate.com` con una lista de unidades, y cada renglón
+es un trabajo distinto:
 
 ```
-Name: Sarah Miller            -> cliente
-Email: sarah.miller@gmail.com -> a quién se le responde (no a GoDaddy)
-Phone: (555) 987-6543         -> va en la orden de trabajo, para llamar al llegar
-Message: ...                  -> descripción del trabajo
-Attach Files                  -> las fotos se guardan y se mandan a la cuadrilla
+B109 vacant,  full tub. 8/8/26
+M102 Vacant, full tub. 8/8/26
+M104 Vacant, full tub. 8/8/26
+J209 vacant, full tub. 8/10/26 AM please
+
+Best Regards,
+Guillermo Gonzalez — Service Manager
+Park Mesa Villas
+550 Paularino Avenue, Costa Mesa, CA 92626
 ```
 
-Las etiquetas funcionan en español y en inglés (`Name`/`Nombre`,
-`Address`/`Dirección`, `Materials`/`Materiales`, `Message`/`Mensaje`...), porque
-el sitio está en inglés pero los mensajes al personal salen en español.
+Ese correo son **4 trabajos**, no uno. De cada renglón se saca:
+
+| Del renglón | Sale |
+|---|---|
+| `B109` | Unit |
+| `vacant` / `occ` | si la unidad está ocupada (hay que avisar al residente) |
+| `full tub` | Service Description, y de ahí el Service (`tub`) |
+| `8/8/26` | DATE — se lee en formato de EE.UU., `8/10/26` es 10 de agosto |
+| `AM` | turno |
+
+Y del remitente (`pmvmaint@rentparkmesa.com`), mirando `data/propiedades.csv`,
+salen **Mgmt CO.** (Shea Properties) y **Property Name** (Park Mesa Villas).
+
+La firma no genera trabajos: un renglón solo cuenta si empieza con un número de
+unidad **y** además nombra un servicio o dice `vacant`/`occ`. Por eso
+`550 Paularino Avenue` y `P. 714-751-6995` se ignoran.
+
+### Servicios que reconoce
+
+`paint`, `jani`, `carpet` y `tub`, con sus variantes (`cc`, `full paint`,
+`flat paint`, `shampoo`, `reglaze`...). Se agregan más en
+`parser.servicios_extra` sin tocar código.
+
+Ojo con un caso: `occ` es *occupied*, `cc` es limpieza de alfombra. El parser
+los distingue, así que `90-es occ cc wear shoe covers pm` se lee como alfombra
+en unidad ocupada, turno PM.
+
+Si un renglón nombra dos servicios (`full paint and jani`), salen **dos**
+trabajos, igual que en tu hoja son dos renglones.
+
+### Canal secundario: el formulario del sitio
+
+`jbrenovate.com` no publica correo; lleva un formulario *"Drop us a line!"* cuyo
+aviso llega **reenviado por GoDaddy**. Esos remitentes van en
+`recepcion.reenviadores` para que no se filtren como `noreply` y para sacar del
+cuerpo el cliente real. Se procesan como una solicitud suelta (un trabajo).
+
+> **Ajusta `recepcion.reenviadores` con un correo real.** El remitente exacto
+> solo se ve en uno que ya te haya llegado.
 
 ## Cómo funciona
 
 ```
-correo del cliente (o formulario del sitio, reenviado)
+correo de la empresa de gestión (varias unidades)
        |
        v
-  [1] se lee la bandeja (IMAP) y se interpreta el correo
-       |  -> folio JB-AAAAMMDD-NNN, cliente, dirección, fecha, materiales
-       |  -> se acusa recibo al cliente
+  [1] se lee la bandeja (IMAP) -> UN TRABAJO POR UNIDAD
+       |  -> folio JB-AAAAMMDD-NNN por unidad
+       |  -> empresa, propiedad, unidad, tamaño, servicio, fecha, turno
+       |  -> un solo acuse de recibo con la lista completa de folios
        v
-  [2] se revisa el inventario (data/inventario.csv)
-       |  -> se marca lo que falta y se avisa al supervisor
+  [2] se calcula el material (data/consumos.csv: servicio + tamaño)
+       |  -> se revisa contra el inventario y se avisa lo que falta
        v
   [3] se convoca a los trabajadores (data/trabajadores.csv)
        |  -> WhatsApp: "¿Puedes asistir? Responde SI o NO"
-       |  -> se eligen por habilidad, zona y carga de trabajo
+       |  -> se eligen por habilidad, zona y carga DE ESE DÍA (tope diario)
        v
   [4] llegan las respuestas (webhook de WhatsApp, correo o a mano)
        |  -> SI  -> cuenta para el cupo
@@ -71,6 +93,9 @@ correo del cliente (o formulario del sitio, reenviado)
           -> se manda la ORDEN DE TRABAJO a cada confirmado
           -> se avisa al cliente que su servicio quedó asignado
           -> a quien seguía pendiente se le avisa que ya está cubierto
+       v
+  [6] python workflow.py exportar
+          -> CSV con las columnas de tu control, listo para Excel
 ```
 
 Cada ciclo es idempotente: si el proceso se cae a medias y vuelve a arrancar,
@@ -102,7 +127,7 @@ esperando los datos) y las alertas al supervisor.
 
 ```bash
 pip install -r requirements.txt      # no agrega dependencias nuevas
-python workflow.py init              # crea data/inventario.csv y data/trabajadores.csv
+python workflow.py init              # crea los 5 CSV de datos con ejemplos
 cp .env.example .env                 # y llena las credenciales del correo
 python workflow.py check             # valida config y prueba la conexión IMAP
 ```
@@ -122,31 +147,99 @@ usuario, y tener la verificación en dos pasos activada. En Google se genera en
 *Cuenta > Seguridad > Contraseñas de aplicaciones*; en Microsoft, en
 *Seguridad > Opciones de seguridad adicionales*.
 
-### Los dos archivos de datos
+### Los cinco archivos de datos
 
-`data/trabajadores.csv` — se edita en Excel:
+Todos se editan en Excel. `python workflow.py init` los crea con ejemplos.
+
+**`data/propiedades.csv`** — quién es cada cliente. Es el que hace que un correo
+se reconozca como lista de unidades:
+
+```csv
+propiedad,empresa_gestion,dominio,contacto,direccion,zona,alias
+Park Mesa Villas,Shea Properties,rentparkmesa.com,pmvmaint@rentparkmesa.com,550 Paularino Ave Costa Mesa CA,costa mesa,PMV|Park Mesa
+```
+
+- `dominio` o `contacto` identifican de quién viene el correo. **Este es el
+  archivo clave**: sin él, un correo de una empresa nueva se procesa como
+  solicitud suelta y no se separa por unidades.
+- `alias` (separados por `|`) sirve cuando escriben desde otro buzón y solo se
+  puede reconocer la propiedad por el nombre en la firma.
+
+**`data/trabajadores.csv`** — tu personal:
 
 ```csv
 id,nombre,telefono,email,habilidades,zona,activo
-T01,Juan Perez,+15551234001,juan@ejemplo.com,pintura|drywall,norte,si
+T06,Luis,+15551234006,luis@ejemplo.com,tinas|pintura,costa mesa,si
 ```
 
-- `habilidades` separadas por `|`. El correo del cliente pide habilidades y solo
-  se convoca a quien las tenga.
-- `zona` se usa para preferir a quien está más cerca.
-- `activo` en `no` saca a esa persona de las convocatorias sin borrarla.
+- `habilidades` separadas por `|`, y se conectan con el servicio en
+  `servicios.habilidades` del config (`tub` -> `tinas`, `paint` -> `pintura`...).
+- `zona` prefiere a quien está más cerca de la propiedad.
+- `activo` en `no` lo saca de las convocatorias sin borrarlo.
 
-`data/inventario.csv`:
+**`data/unidades.csv`** — el tamaño de cada apartamento, que el correo no dice:
+
+```csv
+propiedad,unidad,tamano
+Park Mesa Villas,B109,1+1
+```
+
+Sin esto el tamaño sale vacío y el material no se puede calcular por tamaño.
+
+**`data/consumos.csv`** — cuánto material lleva cada servicio. Los correos
+**nunca** listan materiales, así que esta tabla es la que hace que la cuadrilla
+sepa qué recoger:
+
+```csv
+servicio,tamano,sku,cantidad
+paint,*,BRO-4,2        <- '*' = para cualquier tamaño
+paint,1+1,PIN-BLA-5,2
+paint,3+2,PIN-BLA-5,4  <- la regla del tamaño manda sobre la de '*'
+```
+
+**`data/inventario.csv`** — tus existencias:
 
 ```csv
 sku,nombre,unidad,stock,reservado,minimo
 PIN-BLA-5,Pintura blanca 5 galones,cubeta,12,0,3
 ```
 
-- `reservado` lo maneja el bot: es material comprometido que todavía está en
-  bodega. `disponible = stock - reservado`.
+- `reservado` lo maneja el bot: material comprometido que sigue en bodega.
+  `disponible = stock - reservado`.
 - `minimo` es el punto de reorden; `python workflow.py inventario --bajos`
   muestra lo que ya lo alcanzó.
+
+## El control de trabajos (Excel)
+
+```bash
+python workflow.py exportar --ver              # en pantalla
+python workflow.py exportar                    # a data/control_trabajos.csv
+python workflow.py exportar --desde 2026-08-01 --hasta 2026-08-31
+python workflow.py exportar --solo-asignados   # solo con personal confirmado
+python workflow.py exportar --detalle          # + folio, estado, turno, material
+```
+
+Salen exactamente tus columnas y en el mismo orden, así que se pega directo en
+la hoja:
+
+```
+DATE    | Service | Mgmt CO.        | Property Name    | Person | Unit | Size | Service Description
+8/8/26  | tub     | Shea Properties | Park Mesa Villas | Luis   | B109 | 1+1  | full tub
+8/10/26 | tub     | Shea Properties | Park Mesa Villas | Luis   | J209 | 2+2  | full tub AM
+```
+
+**Person** es quien confirmó asistencia. Si a una unidad van dos personas, salen
+dos renglones, como ya lo llevas tú.
+
+## Tope de trabajo por día
+
+`asistencia.max_trabajos_por_dia` (2 por defecto) limita cuántas unidades toma
+una persona **el mismo día**. Sin ese tope, cuando una empresa manda 6 unidades
+juntas se las lleva todas quien esté más cerca de la propiedad.
+
+La carga se cuenta **por fecha de servicio**: tener el martes lleno no impide
+tomar trabajo el jueves. Si todos llegan al tope, se asigna igual (mejor eso que
+dejar la unidad sin nadie) y queda avisado en el log.
 
 ## WhatsApp
 
@@ -198,7 +291,13 @@ python workflow.py estado                 # trabajos abiertos
 python workflow.py estado --job JB-...    # detalle: material, quién confirmó, historial
 python workflow.py inventario             # existencias, reservado y disponible
 python workflow.py completar JB-...       # cierra el trabajo y descuenta el material
+python workflow.py exportar --ver         # control de trabajos con tus columnas
+python workflow.py simular correo.txt --de pmvmaint@rentparkmesa.com
 ```
+
+`simular` con un remitente de `propiedades.csv` muestra la tabla de unidades
+detectadas con su material, sin tocar el buzón ni mandar nada. Es la forma de
+comprobar que un correo nuevo se lee bien antes de dejarlo en automático.
 
 Para dejarlo corriendo como servicio en Linux:
 
@@ -251,6 +350,10 @@ En `config/workflow.yaml`:
 | Opción | Qué hace |
 |---|---|
 | `general.intervalo_segundos` | Cada cuánto se revisa la bandeja (300 = 5 min) |
+| `asistencia.max_trabajos_por_dia` | Unidades máximas por persona y día (2) |
+| `parser.formato_fecha` | `US` (8/10/26 = 10 de agosto) o `EU` |
+| `parser.servicios_extra` | Más palabras para reconocer cada servicio |
+| `servicios.habilidades` | Qué habilidad exige cada servicio |
 | `general.horario_envios.zona_horaria` | Tu zona horaria real (revísala) |
 | `general.horario_envios.inicio` / `.fin` / `.dias` | Ventana en que se puede molestar al personal |
 | `recepcion.reenviadores` | Remitentes que reenvían el formulario web (revísalo) |
@@ -278,8 +381,8 @@ El bot manda una alerta al supervisor (`alertas.email_supervisor` /
 python -m pytest tests/test_workflow.py -q
 ```
 
-78 pruebas que cubren el parser de correos (incluido un formulario web
-reenviado por GoDaddy), el inventario, la selección de trabajadores, la máquina
-de estados de asistencia, los adjuntos, la ventana de envíos y un ciclo completo
-de punta a punta con buzón y WhatsApp simulados. No tocan la red ni necesitan
-credenciales.
+109 pruebas. Entre ellas, el correo real de Park Mesa Villas de punta a punta:
+que salgan 4 trabajos y no 1, que la firma no genere trabajos falsos, que
+`8/10/26` sea el 10 de agosto, que `occ` no se confunda con `cc`, que un reenvío
+de la misma lista no duplique nada, y que el export reproduzca las columnas de
+la hoja. No tocan la red ni necesitan credenciales.
