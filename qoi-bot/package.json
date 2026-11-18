@@ -8,7 +8,8 @@
     "start": "node launcher.js",
     "instalar-horario": "node instalar-horario.js",
     "ver": "tail -n 40 -f registros/consola.log",
-    "probar": "node runner.js --probar && node mt5-probar.js"
+    "probar": "node runner.js --probar && node mt5-probar.js",
+    "backtest": "node backtest.js ambos 1000"
   },
   "dependencies": {
     "playwright": "1.47.2"
