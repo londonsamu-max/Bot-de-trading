@@ -328,11 +328,14 @@
       try {
         const v = await Promise.race([window.qbotVolumen(tk, pos.k, eNow), wait(4000).then(() => null)]);
         if (v) {
-          if (v.lejosNodos && M.lejosNodos) { factor *= M.lejosNodos; motivos.push(`nivel lejos de nodos de volumen (${v.distNodo.toFixed(1)} pts) ×${M.lejosNodos}`); }
+          if (v.lejosNodos && M.lejosNodos && M.lejosNodos !== 1) { factor *= M.lejosNodos; motivos.push(`nivel lejos de nodos de volumen (${v.distNodo.toFixed(1)} pts) ×${M.lejosNodos}`); }
           if (v.dentroValor && M.dentroValor) { factor *= M.dentroValor; motivos.push(`dentro del valor de ayer ×${M.dentroValor}`); }
         } else motivos.push('sin datos de volumen');
       } catch (e) { motivos.push('volumen no disponible'); }
     }
+    // Contra el movimiento del día: si el día ya va más de contraDiaPts (pts SPX) en contra de la operación, menos riesgo
+    const abre = S.abre && S.abre[tk]; const movDia = isFinite(abre) ? (eNow - abre) * pos.d / TK[tk].sc : 0;
+    if (M.contraDia && movDia < -(M.contraDiaPts || 10)) { factor *= M.contraDia; motivos.push(`contra el día (${movDia.toFixed(0)} pts) ×${M.contraDia}`); }
     // Rupturas en números redondos (Osler 2003: los stops se acumulan justo pasando esos niveles)
     const esRuptura = pos.mode === 'ruptura' || /ruptura/.test(pos.leg || '');
     const redondo = tk === 'SPX' ? pos.k % 50 === 0 : pos.k % 5 === 0;
@@ -394,7 +397,7 @@
         if (age > 180) { log(`datos atrasados ${Math.round(age)} s: no se evalúa`, tk); return; }
         if (S.last[tk] && nyHM(S.last[tk]) === nyHM(snap.t)) return; // mismo minuto
         S.last[tk] = snap.t;
-        S.px = S.px || {}; S.px[tk] = snap.spot;
+        S.px = S.px || {}; S.px[tk] = snap.spot; S.abre = S.abre || {}; if (S.abre[tk] == null) S.abre[tk] = snap.spot;
         await handle(tk, S.eng[tk].onMinute(snap));
         for (const [g, e] of Object.entries((S.extra && S.extra[tk]) || {})) await handle(tk, e.onMinute(snap), g);
         if (S.obs && S.obs[tk] && window.qbotNivel) { try { for (const r of S.obs[tk].onMinute(snap)) window.qbotNivel(tk, r); } catch (e) { console.warn('[QBOT] observador', e.message); } }
@@ -448,6 +451,7 @@
         if (st.pend) log(`al cargar el historial había una orden armada ${st.pend.regla} en ${st.pend.k} (dispara en ${st.pend.trig.toFixed(2)}): sigue activa`, L);
         }
         S.last[tk] = h.length ? h[h.length - 1].t : null;
+        S.abre = S.abre || {}; S.abre[tk] = h.length ? h[0].spot : null; // apertura del día, para el movimiento del día
         log(`historial cargado: ${byMin.size} minutos`, tk);
       } catch (e) { S.warmFail[tk] = true; log('no se pudo cargar el historial: ' + e.message + ' (se recarga cuando vuelvan los datos)', tk); }
     }

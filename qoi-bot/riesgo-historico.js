@@ -34,6 +34,8 @@ function minutosDia(tk, d) {
   }
   memo.set(key, out); return out;
 }
+const snapsMemo = new Map();
+function memoSnaps(tk, d) { const k = tk + d; if (!snapsMemo.has(k)) snapsMemo.set(k, JSON.parse(fs.readFileSync(path.join(CACHE, `${tk}_${d}.json`), 'utf8')).map(histSnap()).filter(Boolean)); return snapsMemo.get(k); }
 function diasDe(tk) { return fs.readdirSync(CACHE).filter((f) => new RegExp(`^${tk}_\\d{4}-\\d{2}-\\d{2}\\.json$`).test(f)).map((f) => f.slice(tk.length + 1, -5)).sort(); }
 
 // o: operación del backtest ({tk, d, hora, lado, e, k, regla, regimen, motor}) · M: config.motor
@@ -48,10 +50,16 @@ function factor(o, M) {
       const nodos = (p) => (p ? [p.poc, p.vah, p.val, ...p.hvn] : []); const todos = [...nodos(pa), ...nodos(ph)];
       if (pa && todos.length) {
         const dist = Math.min(...todos.map((v) => Math.abs(v - o.k))) / ESCALA[o.tk];
-        if (dist >= 5 && M.lejosNodos) { f *= M.lejosNodos; motivos.push('lejos de nodos de volumen'); }
+        if (dist >= 5 && M.lejosNodos && M.lejosNodos !== 1) { f *= M.lejosNodos; motivos.push('lejos de nodos de volumen'); }
         if (o.e <= pa.vah && o.e >= pa.val && M.dentroValor) { f *= M.dentroValor; motivos.push('dentro del valor de ayer'); }
       }
     } else motivos.push('sin datos de volumen');
+  }
+  if (M.contraDia) { // movimiento del día al entrar: precio de entrada vs primer minuto de la sesión (datos de Quantium)
+    const sf = path.join(CACHE, `${o.tk}_${o.d}.json`);
+    if (fs.existsSync(sf)) { const S = memoSnaps(o.tk, o.d); const abre = S.length ? S[0].spot : null; const ent = S.filter((x) => hmNY(x.t.getTime()) < o.hora).pop();
+      const mov = abre && ent ? (ent.spot - abre) * (o.lado === 'compra' ? 1 : -1) / ESCALA[o.tk] : 0;
+      if (mov < -(M.contraDiaPts || 10)) { f *= M.contraDia; motivos.push('contra el día'); } }
   }
   const ruptura = /ruptura/.test(o.regla); const redondo = o.tk === 'SPX' ? o.k % 50 === 0 : o.k % 5 === 0;
   if (M.redondos && ruptura && redondo) { f *= M.redondos; motivos.push('ruptura en número redondo'); }
