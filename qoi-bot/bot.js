@@ -322,7 +322,23 @@
     if (stopF == null) { log('sin ratio MNQ/QQQ: no se envía', g ? tk + '·' + g : tk); return false; }
     // Régimen al entrar: a favor = compra arriba del gamma flip o venta debajo. En contra se arriesga una fracción (motor.riesgoContra)
     const flip = S.live && S.live[tk] ? S.live[tk].flip : NaN; const favor = isFinite(flip) ? (eNow - flip) * pos.d > 0 : true;
-    const factor = favor ? 1 : ((cfg.motor && cfg.motor.riesgoContra) || 1); pos.riesgoFactor = factor;
+    const M = cfg.motor || {}; let factor = favor ? 1 : (M.riesgoContra || 1); const motivos = favor ? [] : ['contra régimen ×' + (M.riesgoContra || 1)];
+    // Perfil de volumen diario (SPY/QQQ): nivel lejos de nodos de volumen → más riesgo; entrada dentro del valor de ayer → menos
+    if (M.volumen && window.qbotVolumen) {
+      try {
+        const v = await Promise.race([window.qbotVolumen(tk, pos.k, eNow), wait(4000).then(() => null)]);
+        if (v) {
+          if (v.lejosNodos && M.lejosNodos) { factor *= M.lejosNodos; motivos.push(`nivel lejos de nodos de volumen (${v.distNodo.toFixed(1)} pts) ×${M.lejosNodos}`); }
+          if (v.dentroValor && M.dentroValor) { factor *= M.dentroValor; motivos.push(`dentro del valor de ayer ×${M.dentroValor}`); }
+        } else motivos.push('sin datos de volumen');
+      } catch (e) { motivos.push('volumen no disponible'); }
+    }
+    // Rupturas en números redondos (Osler 2003: los stops se acumulan justo pasando esos niveles)
+    const esRuptura = pos.mode === 'ruptura' || /ruptura/.test(pos.leg || '');
+    const redondo = tk === 'SPX' ? pos.k % 50 === 0 : pos.k % 5 === 0;
+    if (M.redondos && esRuptura && redondo) { factor *= M.redondos; motivos.push(`ruptura en número redondo ×${M.redondos}`); }
+    if (M.riesgoMax && factor > M.riesgoMax) { factor = M.riesgoMax; motivos.push(`tope ×${M.riesgoMax}`); }
+    factor = Math.round(factor * 1000) / 1000; pos.riesgoFactor = factor; pos.riesgoMotivos = motivos;
     const qty = Math.min(c.maxQty, Math.floor(cfg.riesgoUSD * factor / (stopF * c.pv)));
     if (qty < 1) { log(`stop de ${stopF.toFixed(2)} pts es muy amplio para $${cfg.riesgoUSD}: no se envía`, g ? tk + '·' + g : tk); return false; }
     const body = { ticker: c.ticker, action: pos.d > 0 ? 'buy' : 'sell', quantity: qty, stopLoss: { type: 'stop', amount: tick4(stopF) } }; if (g) body.grupo = g; if (factor !== 1) body.riesgoFactor = factor;
@@ -330,7 +346,7 @@
     let r = await post(body);
     if (!r.ok && !r.papel) { log('la entrada falló: reintentando en 1 s', g ? tk + '·' + g : tk, 'FALLÓ ' + r.status); await wait(1000); r = await post(body); }
     pos.qty = qty; pos.sent = true;
-    log(`${r.papel ? '[papel] ' : ''}${body.action.toUpperCase()} ${qty} ${c.ticker}${factor !== 1 ? ` · contra régimen: riesgo ×${factor}` : ''} · stop ${body.stopLoss.amount} pts${body.takeProfit ? ' · objetivo ' + body.takeProfit.amount : ''} · ${pos.regla} ${pos.leg}${pos.run ? ' · corredor' : ''} · nivel ${pos.k}`, g ? tk + '·' + g : tk, r.papel ? '' : (r.ok ? 'OK ' + r.status : 'FALLÓ ' + r.status));
+    log(`${r.papel ? '[papel] ' : ''}${body.action.toUpperCase()} ${qty} ${c.ticker}${factor !== 1 || motivos.length ? ` · riesgo ×${factor} (${motivos.join(', ')})` : ''} · stop ${body.stopLoss.amount} pts${body.takeProfit ? ' · objetivo ' + body.takeProfit.amount : ''} · ${pos.regla} ${pos.leg}${pos.run ? ' · corredor' : ''} · nivel ${pos.k}`, g ? tk + '·' + g : tk, r.papel ? '' : (r.ok ? 'OK ' + r.status : 'FALLÓ ' + r.status));
     return true;
   }
   async function sendTrail(tk, pos, g) {

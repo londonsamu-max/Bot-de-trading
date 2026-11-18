@@ -17,12 +17,13 @@ async function descargar() {
   const dias = fs.readdirSync(CACHE).filter((f) => /^(SPX|QQQ)_\d{4}-\d{2}-\d{2}\.json$/.test(f));
   let n = 0;
   for (const f of dias) {
-    const tk = f.slice(0, 3); const d = f.slice(4, 14); const out = path.join(CACHE, `vol_${tk}_${d}.json`);
+    const tk = f.slice(0, 3); const d = f.slice(4, 14); const out = path.join(CACHE, `vol2_${tk}_${d}.json`);
     if (fs.existsSync(out)) continue;
     const r = await fetch(`https://api-spike.quantium.global/uw/ohlc/1m?ticker=${FUENTE[tk]}&date=${d}`, { headers: { Authorization: 'Bearer ' + sesion.accessToken() } });
     if (!r.ok) { console.log(d, tk, 'sin volumen', r.status); continue; }
     const j = await r.json();
-    const filas = (j.data || []).filter((x) => x.market_time === 'r').map((x) => ({ t: Date.parse(x.start_time), o: +x.open, h: +x.high, l: +x.low, c: +x.close, v: +x.volume }));
+    // se guardan todas las sesiones: s = 'pr' (premarket), 'r' (regular, RTH) o 'po' (after-hours)
+    const filas = (j.data || []).map((x) => ({ t: Date.parse(x.start_time), o: +x.open, h: +x.high, l: +x.low, c: +x.close, v: +x.volume, s: x.market_time }));
     fs.writeFileSync(out, JSON.stringify(filas)); n++;
   }
   console.log(`volumen descargado de ${n} días nuevos`);

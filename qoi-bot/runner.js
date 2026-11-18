@@ -71,6 +71,7 @@ async function correr() {
     qbotLog: async (row) => { writeLog(row); console.log(`[${row.hora} NY] ${row.tk} ${row.msg} ${row.extra || ''}`); if (/OK|FALLÓ/.test(row.extra || '') || /APAGADO|límite de pérdida/.test(row.msg)) avisar(`${row.tk} ${row.msg}`.slice(0, 120), row.extra); },
     qbotNQ: async () => (c.ratioMNQ ? null : await getNQ()),
     qbotTieneTickets: async (ticker, g) => { try { return mt5.tieneTickets(ticker, g); } catch (e) { return false; } },
+    qbotVolumen: async (tk, nivel, precio) => { try { return await require('./volumen-vivo').rasgos(tk, nivel, precio); } catch (e) { sys('volumen no disponible: ' + e.message); return null; } },
     // Observador de niveles: un registro por línea en registros/niveles/niveles_FECHA.jsonl (para estudiar, no opera)
     qbotNivel: (tk, r) => { try { const dir = path.join(DIR, 'registros', 'niveles'); fs.mkdirSync(dir, { recursive: true });
       const d = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
@@ -110,6 +111,8 @@ async function correr() {
         try { require('child_process').execSync('open -a "MetaTrader 5"'); } catch (x) { sys('no se pudo abrir MT5: ' + x.message); }
       }
     }
+    // precarga el volumen por minuto de SPY/QQQ para el ajuste de riesgo de las entradas
+    if ((readCfg().motor || {}).volumen) require('./volumen-vivo').precargar().catch(() => {});
     if (ctx.QBOT && !ctx.QBOT.running && !ctx.QBOT.state.apagado) { sys('el bot no estaba corriendo: arrancando'); ctx.QBOT.start(); }
   }, 60000);
   process.on('SIGINT', () => salir('detenido con Ctrl+C'));
