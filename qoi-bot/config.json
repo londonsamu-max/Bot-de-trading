@@ -27,8 +27,8 @@
         "NAS100": 1
       },
       "maxLotes": {
-        "US500": 25,
-        "NAS100": 25
+        "US500": 50,
+        "NAS100": 50
       },
       "cuentaPermitida": null
     },
