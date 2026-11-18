@@ -17,7 +17,7 @@
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
       F: false, FSL: 8, FMG: 0, FTR: null, soloF: false,
       // Reglas experimentales (apagadas): G = venta en el call wall llegando desde abajo; H = ruptura en barra mediana
-      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, oiN: 0, oiPct: 0.9, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -95,6 +95,9 @@
       if (isFinite(s.cw)) L.set(s.cw, 'call wall');
       if (isFinite(s.pw) && !L.has(s.pw)) L.set(s.pw, 'put wall');
       for (const k of majors(s, 40, 6, C.mg).slice(0, 2)) if (!L.has(k)) L.set(k, 'gex');
+      // oiN (en prueba): además, los strikes con más open interest cerca del precio (los más "cargados"), aunque su gamma sea menor;
+      // se clasifican igual (signo de gamma + calls/puts comprados o vendidos) y los evalúan las mismas reglas
+      if (C.oiN) { const ths = pct(s.strikes.map(x => x.oc + x.op), C.oiPct); for (const x of s.strikes.filter(x => Math.abs(x.k - s.spot) <= P(40) && isFinite(x.gf) && x.oc + x.op >= ths).sort((a, b) => (b.oc + b.op) - (a.oc + a.op)).slice(0, C.oiN)) if (!L.has(x.k)) L.set(x.k, 'oi'); }
       if (C.F && C.FMG) for (const k of majors(s, 40, 6, C.mg * C.FMG).slice(0, 4)) if (!L.has(k)) L.set(k, 'gexF');
       if (C.soloH) { L.clear(); for (const k of majors(s, 40, 6, C.mg * 0.15).slice(0, 4)) { const x = s.strikes.find(z => z.k === k); if (x && Math.abs(x.gf) < C.mg) L.set(k, 'barra mediana'); } }
       if (C.soloG) { L.clear(); if (isFinite(s.cw)) L.set(s.cw, 'call wall'); } // barras medianas: solo para la regla F (experimental)
