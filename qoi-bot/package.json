@@ -1,0 +1,14 @@
+{
+  "name": "qoi-bot",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Bot Q OI: corre la máquina sobre Quantium y manda señales de MES/MNQ a TradersPost",
+  "scripts": {
+    "login": "node launcher.js --login",
+    "start": "node launcher.js",
+    "instalar-horario": "node instalar-horario.js"
+  },
+  "dependencies": {
+    "playwright": "1.47.2"
+  }
+}

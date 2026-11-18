@@ -1,0 +1,34 @@
+BOT Q OI v0.4 — todo por código
+================================
+
+Qué hace
+- Abre Quantium en un Chrome propio del bot, carga la máquina (reglas A, C, D, E, corredor, apertura) sobre SPX y QQQ,
+  y manda las señales de MES y MNQ a una o varias cuentas por webhook de TradersPost.
+- Calcula solo el ratio MNQ/QQQ cada mañana, guarda todo en registros/qbot_FECHA.csv y se cierra a las 16:10 NY.
+- El token de Quantium no sale del navegador: el programa solo recibe las señales ya calculadas.
+
+Instalación (una vez, en la terminal, dentro de esta carpeta)
+  1. Instala Node.js 18 o superior (nodejs.org).
+  2. npm install
+  3. npx playwright install chromium
+  4. npm run login          -> se abre Quantium: inicia sesión y cierra la ventana.
+  5. npm run instalar-horario -> arranca solo de lunes a viernes a las 8:20 (hora del computador).
+  Para probar ya mismo: npm start   (Ctrl+C para detener)
+
+Cuentas (config.json -> "cuentas")
+- Cada cuenta es una estrategia de TradersPost conectada a un bróker de futuros o a una empresa de fondeo,
+  con su propio webhook, riesgo por operación y máximo de contratos.
+- El bot manda la misma señal a todas las cuentas activas y ajusta el tamaño al riesgo de cada una.
+- Antes de activar una cuenta de fondeo, confirma por escrito con la empresa que permite operar con bots.
+
+Papel / demo
+- "modo": "papel"  -> no envía nada, solo registra (así viene).
+- "modo": "demo"   -> envía a las cuentas con "activa": true y webhook puesto.
+- El programa relee config.json en cada señal: volver a "papel" corta los envíos al instante.
+
+Requisitos
+- Computador encendido con tu sesión abierta a la hora de arranque.
+- Quantium Premium. Revisa los términos de Quantium y de tu empresa de fondeo sobre automatización.
+- Contratos: MESZ2026 y MNQZ2026 vencen en diciembre; cámbialos en config.json al hacer el roll.
+
+Desinstalar el horario: node instalar-horario.js --quitar

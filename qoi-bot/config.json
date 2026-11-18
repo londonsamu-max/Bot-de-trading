@@ -1,0 +1,41 @@
+{
+  "modo": "papel",
+  "riesgoUSD": 250,
+  "maxPerdidaR": 3,
+  "maxOps": 8,
+  "SPX": {
+    "activo": true,
+    "ticker": "MESZ2026",
+    "maxQty": 10
+  },
+  "QQQ": {
+    "activo": true,
+    "ticker": "MNQZ2026",
+    "maxQty": 10
+  },
+  "ratioMNQ": null,
+  "cerrarHoraNY": "16:10",
+  "verVentana": true,
+  "cuentas": [
+    {
+      "nombre": "Tradovate demo",
+      "webhook": "",
+      "activa": true,
+      "riesgoUSD": 250,
+      "maxQty": {
+        "MES": 10,
+        "MNQ": 10
+      }
+    },
+    {
+      "nombre": "Fondeo (Apex/Topstep/otra)",
+      "webhook": "",
+      "activa": false,
+      "riesgoUSD": 200,
+      "maxQty": {
+        "MES": 5,
+        "MNQ": 5
+      }
+    }
+  ]
+}
