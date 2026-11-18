@@ -22,8 +22,9 @@ function reales() {
       const [hora, inst, evento, resp] = l.split(';'); if (!resp) continue;
       const m = resp.match(/OK (compra|venta) ([\d.]+) lotes (US500|NAS100)[^@]*@ ([\d.]+) · stop ([\d.]+) · ticket (\d+)/); if (!m) continue;
       const [, lado, lotes, cfd, entrada, stop, ticket] = m; const t = Number(ticket);
-      const em = evento.match(/^(?:\[papel\] )?(BUY|SELL) \S+ \S+ · stop [\d.]+ pts(?: · objetivo ([\d.]+))? · (.+?) · nivel (\d+)/) || [];
-      const motor = (inst.split('·')[1] || 'principal'); const r = { tipo: 'real', dia, hora, instrumento: inst.split('·')[0], cfd, motor, regla: em[3] || '', nivel: Number(em[4]) || null,
+      const em = evento.match(/^(?:\[papel\] )?(BUY|SELL) \S+ \S+(?: · [^·]*riesgo[^·]*)? · stop [\d.]+ pts(?: · objetivo ([\d.]+))? · (.+?) · nivel (\d+)/) || [];
+      const rm = evento.match(/riesgo ×([\d.]+)(?: \(([^)]*)\))?/) || evento.match(/contra régimen: riesgo ×([\d.]+)/);
+      const motor = (inst.split('·')[1] || 'principal'); const r = { tipo: 'real', dia, hora, instrumento: inst.split('·')[0], cfd, motor, regla: em[3] || '', nivel: Number(em[4]) || null, riesgo: rm ? Number(rm[1]) : 1, motivos: rm && rm[2] ? rm[2].replace(/ ×[\d.]+/g, '') : (rm ? 'contra régimen' : ''),
         lado, lotes: Number(lotes), entrada: Number(entrada), stop: Number(stop), ticket: t };
       // cierre: por el bot ("close #ticket") o por stop/objetivo en MT5 (primer trato contrario del mismo tamaño y símbolo)
       let cierre = null; const idx = log.findIndex((x) => x.includes(`based on order #${t})`)); const opuesto = lado === 'compra' ? 'sell' : 'buy';
@@ -47,10 +48,11 @@ function simuladas() {
   const ratio = Number(((fs.readFileSync(path.join(REG, 'consola.log'), 'utf8').match(/ratio MNQ\/QQQ automático = ([\d.]+)/g) || []).pop() || '= 41').split('= ')[1]);
   return JSON.parse(fs.readFileSync(f, 'utf8')).map((o) => {
     const k = o.tk === 'SPX' ? 1 : ratio; const cfd = o.tk === 'SPX' ? 'US500' : 'NAS100';
-    const favor = o.regimen ? ((o.lado === 'compra') === (o.regimen === '+')) : true; const factor = favor ? 1 : ((cfg.motor || {}).riesgoContra || 1);
+    const favor = o.regimen ? ((o.lado === 'compra') === (o.regimen === '+')) : true;
+    const rh = require('./riesgo-historico').factor(o, cfg.motor || {}); const factor = rh.factor; // mismo ajuste de riesgo que el bot en vivo
     const stopC = Math.abs(o.e - o.st0) * k; const lotes = Math.min((cta.maxLotes || {})[cfd] || 50, Math.floor(cta.riesgoUSD * factor / stopC * 100) / 100);
     return { tipo: 'simulada', dia: o.d, hora: o.hora, horaSalida: o.horaSal, instrumento: o.tk, cfd, motor: o.motor, regla: o.regla, nivel: o.k, tipoNivel: o.tipo,
-      lado: o.lado, lotes, entrada: o.e, stop: o.st0, salida: o.px, puntos: o.pts, R: o.R, usd: o.pts * k * lotes, salidaPor: o.why, estado: 'cerrada', regimen: favor ? 'a favor' : 'en contra' };
+      lado: o.lado, lotes, entrada: o.e, stop: o.st0, salida: o.px, puntos: o.pts, R: o.R, usd: o.pts * k * lotes, salidaPor: o.why, estado: 'cerrada', regimen: favor ? 'a favor' : 'en contra', riesgo: factor, motivos: rh.motivos.join(', ') };
   });
 }
 
