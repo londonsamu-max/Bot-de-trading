@@ -45,7 +45,7 @@ Modo sin navegador (runner.js) — es el que usa el horario
 MetaTrader 5 (Pepperstone demo) — sin TradersPost
 - Cuenta en config.json con "tipo": "mt5". MES -> US500, MNQ -> NAS100; lotes = riesgoUSD / (stop × usdPorPuntoLote).
 - Necesita MT5 abierto con UN solo EA SpotGammaBridge en un gráfico, Algo Trading activo y US500 en Observación del Mercado.
-  Parámetros del EA: InpMaxLotSize 10, InpOrderPollMs 100.
+  Parámetros del EA: InpMaxLotSize 25, InpOrderPollMs 100.
 - Solo opera si la cuenta es DEMO y solo cierra las posiciones que abrió el bot (registros/mt5_tickets.json).
 - Probar: node mt5-probar.js   (estado)   ·   node mt5-probar.js --orden   (0.1 lote US500 y cierra)
 
