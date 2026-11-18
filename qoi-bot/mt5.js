@@ -81,7 +81,7 @@ async function senal(body, cuenta) {
     const tp = body.takeProfit ? (largo ? entrada + body.takeProfit.amount : entrada - body.takeProfit.amount) : 0;
     const res = await enviar({ action: 'place_order', cfd, direction: largo ? 'LONG' : 'SHORT', volume: lotes, sl, tp1: tp, tp2: 0, tp3: 0 });
     if (!res.success) return `${cuenta.nombre}: FALLÓ ${res.error || res.retcode}`;
-    const t = leerTickets(); (t[cfd] = t[cfd] || []).push(res.ticket); guardarTickets(t);
+    const t = leerTickets(); (t[cfd] = t[cfd] || []).push({ t: res.ticket, px: Number(res.price) || entrada, d: largo ? 1 : -1 }); guardarTickets(t);
     const real = res.volume != null ? Number(res.volume) : lotes; // el EA puede recortar al máximo de lote que tenga configurado
     return `${cuenta.nombre}: OK ${largo ? 'compra' : 'venta'} ${real} lotes ${cfd}${real < lotes ? ` (pedidos ${lotes}: el EA los recortó)` : ''} @ ${res.price} · stop ${sl.toFixed(1)} · ticket ${res.ticket} · ${res.ms} ms`;
   }
@@ -90,14 +90,27 @@ async function senal(body, cuenta) {
     // una posición recién abierta podría no aparecer aún). "Posicion no encontrada" = ya la cerró el stop u objetivo.
     const t = leerTickets(); const mios = t[cfd] || [];
     const out = []; const quedan = [];
-    for (const k of mios) {
+    for (const it of mios) {
+      const k = typeof it === 'object' ? it.t : it;
       const res = await enviar({ action: 'close_position', ticket: k, volume: 0 });
       if (res.success) out.push(`${k} cerrada (${res.ms} ms)`);
       else if (/no encontrada/i.test(res.error || '')) out.push(`${k} ya estaba cerrada`);
-      else { out.push(`${k} FALLÓ ${res.error || res.retcode}`); quedan.push(k); }
+      else { out.push(`${k} FALLÓ ${res.error || res.retcode}`); quedan.push(it); }
     }
     t[cfd] = quedan; guardarTickets(t);
     return `${cuenta.nombre}: ${out.length ? out.join(', ') : `sin posiciones del bot en ${cfd}`}`;
+  }
+  if (body.action === 'mover_stop') {
+    // El motor subió (o bajó) su stop: se lleva al mismo lugar en MT5, relativo al precio de entrada de cada posición del bot
+    const t = leerTickets(); const mios = (t[cfd] || []).filter((it) => typeof it === 'object' && isFinite(it.px));
+    if (!mios.length) return `${cuenta.nombre}: sin posiciones del bot en ${cfd} para mover el stop`;
+    const out = [];
+    for (const it of mios) {
+      const sl = it.px + Number(body.stopRel);
+      const res = await enviar({ action: 'modify_sl', ticket: it.t, new_sl: sl, new_tp: 0 });
+      out.push(res.success ? `stop ${it.t} → ${sl.toFixed(1)} (${res.ms} ms)` : /no encontrada/i.test(res.error || '') ? `${it.t} ya estaba cerrada` : `${it.t} FALLÓ mover stop: ${res.error || res.retcode}`);
+    }
+    return `${cuenta.nombre}: ${out.join(', ')}`;
   }
   return `${cuenta.nombre}: ${body.action} no aplica en MT5 (órdenes a mercado)`;
 }

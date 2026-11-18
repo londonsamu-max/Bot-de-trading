@@ -53,7 +53,7 @@ const nyHM = (t) => new Date(t.toLocaleString('en-US', { timeZone: 'America/New_
       let raw; try { raw = await dia(tk, d); } catch (e) { process.stderr.write(`  ${d} sin datos (${e.message})\n`); continue; }
       const snaps = raw.map(bot.QBOT._test.histSnap).filter(Boolean);
       const porMin = new Map(); for (const s of snaps) porMin.set(nyHM(s.t), s);
-      const eng = bot.QOIEngine({ sc: TK[tk].sc, cfg: { mg: TK[tk].mg, skipRebMinus: TK[tk].skip } });
+      const eng = bot.QOIEngine({ sc: TK[tk].sc, cfg: Object.assign({ mg: TK[tk].mg, skipRebMinus: TK[tk].skip }, process.env.QBOT_PROX ? { prox: Number(process.env.QBOT_PROX) } : {}, process.env.QBOT_F ? { F: true, FSL: Number(process.env.QBOT_F) } : {}, process.env.QBOT_MG ? { mg: TK[tk].mg * Number(process.env.QBOT_MG) } : {}) });
       let n = 0, Rdia = 0, abierta = null;
       for (const s of porMin.values()) {
         for (const ev of eng.onMinute(s)) {

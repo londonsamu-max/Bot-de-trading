@@ -15,6 +15,8 @@
       mg: 2.34e9, open: true, opd: 1.5, cht: 0.1,
       corr: { min: 3, ruptura: [30, 15], rebote: [20, 10], noTighten: true, maxMin: 180, A: [25, 15] },
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
+      F: false, FSL: 8,                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
       skipRebMinus: false,                   // no operar el rebote sin vuelta (DEX y charm negativos); se activa en QQQ/SPY
@@ -91,7 +93,7 @@
       for (const k of majors(s, 40, 6, C.mg).slice(0, 2)) if (!L.has(k)) L.set(k, 'gex');
       const reg = p > s.flip ? 1 : -1;
       for (const [k, tipo] of L) {
-        const sk = s.strikes.find(x => x.k === k); if (!sk || Math.abs(p - k) > P(1.5) || (k in st.last && n - st.last[k] < 15)) continue;
+        const sk = s.strikes.find(x => x.k === k); if (!sk || Math.abs(p - k) > P(C.prox) || (k in st.last && n - st.last[k] < 15)) continue;
         let side;
         if (mm < 585 && H.length < 16) {
           if (!C.open || (tipo !== 'call wall' && tipo !== 'put wall') || Math.abs(p - k) > P(C.opd) || (k in st.last)) continue;
@@ -113,6 +115,8 @@
         if (g < 0 && side < 0 && scs < 0 && oc > op) { if (C.noRepeat && st.failed['D' + k]) continue; st.pend = { n0: n, t0: s.t, d: 1, trig: k + P(C.D.brk), stop: k + P(C.D.brk) - P(C.D.sl), cancel: k - P(15), wait: 90, regla: 'D', k, tipo, info, leg: 'compra ruptura D' }; emit({ type: 'armed', t: s.t, pend: st.pend }); break; }
         // Regla E
         if (g < 0 && side > 0 && sps < 0 && op > oc) { if (C.noRepeat && st.failed['E' + k]) continue; st.pend = { n0: n, t0: s.t, d: -1, trig: k - P(C.E.brk), stop: k - P(C.E.brk) + P(C.E.sl), cancel: k + P(15), wait: 90, regla: 'E', k, tipo, info, leg: 'venta ruptura E' }; emit({ type: 'armed', t: s.t, pend: st.pend }); break; }
+        // Regla F (experimental, apagada por defecto)
+        if (C.F && g < 0 && side < 0 && op > oc) { st.pos = openLeg(s, n, p, -1, k + P(C.FSL), 'rebote', 'F', k, tipo, info, 'venta rechazo F'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; }
         // Regla C
         if (g > 0) {
           const cls = oc >= op ? (scs > 0 ? 'calls vendidos' : 'calls comprados') : (sps > 0 ? 'puts vendidos' : 'puts comprados');
@@ -223,15 +227,26 @@
   function futPts(tk, idxPts) { return tk === 'SPX' ? idxPts : (cfg.QQQ.ratio ? idxPts * cfg.QQQ.ratio : null); }
   const tick4 = (x) => Math.round(x * 4) / 4;
   async function sendEntry(tk, pos) {
-    const c = cfg[tk]; const stopIdx = Math.abs(pos.e - pos.st0); const stopF = futPts(tk, stopIdx);
+    // El stop en el bróker se pone en el MISMO nivel absoluto que el del motor, medido desde el precio real de envío
+    // (en órdenes armadas el motor anota la entrada en el disparo, pero el envío sale al precio del minuto).
+    const c = cfg[tk]; const eNow = (S.px && isFinite(S.px[tk])) ? S.px[tk] : pos.e; pos.eFill = eNow;
+    const stopIdx = Math.abs(eNow - pos.st0); const stopF = futPts(tk, stopIdx);
+    if ((eNow - pos.st0) * pos.d <= 0) { log('el precio ya está en el stop del modelo: no se envía', tk); return false; }
     if (stopF == null) { log('sin ratio MNQ/QQQ: no se envía', tk); return false; }
     const qty = Math.min(c.maxQty, Math.floor(cfg.riesgoUSD / (stopF * c.pv)));
     if (qty < 1) { log(`stop de ${stopF.toFixed(2)} pts es muy amplio para $${cfg.riesgoUSD}: no se envía`, tk); return false; }
     const body = { ticker: c.ticker, action: pos.d > 0 ? 'buy' : 'sell', quantity: qty, stopLoss: { type: 'stop', amount: tick4(stopF) } };
-    if (pos.tp) body.takeProfit = { amount: tick4(futPts(tk, pos.tp)) };
-    const r = await post(body); pos.qty = qty; pos.sent = true;
+    if (pos.tp) { const tpLeft = pos.tp - (eNow - pos.e) * pos.d; if (tpLeft > 0) body.takeProfit = { amount: tick4(futPts(tk, tpLeft)) }; }
+    let r = await post(body);
+    if (!r.ok && !r.papel) { log('la entrada falló: reintentando en 1 s', tk, 'FALLÓ ' + r.status); await wait(1000); r = await post(body); }
+    pos.qty = qty; pos.sent = true;
     log(`${r.papel ? '[papel] ' : ''}${body.action.toUpperCase()} ${qty} ${c.ticker} · stop ${body.stopLoss.amount} pts${body.takeProfit ? ' · objetivo ' + body.takeProfit.amount : ''} · ${pos.regla} ${pos.leg}${pos.run ? ' · corredor' : ''} · nivel ${pos.k}`, tk, r.papel ? '' : (r.ok ? 'OK ' + r.status : 'FALLÓ ' + r.status));
     return true;
+  }
+  async function sendTrail(tk, pos) {
+    const rel = futPts(tk, pos.st - (isFinite(pos.eFill) ? pos.eFill : pos.e)); if (rel == null) return; // stop relativo a la entrada, en puntos del futuro/CFD
+    const r = await post({ ticker: cfg[tk].ticker, action: 'mover_stop', stopRel: tick4(rel) });
+    if (!r.papel) log(`stop movido a ${pos.st.toFixed(2)} (${rel >= 0 ? '+' : ''}${tick4(rel)} pts desde la entrada)`, tk, r.ok ? 'OK ' + (r.status || '') : 'FALLÓ ' + r.status);
   }
   async function sendExit(tk, why) {
     const c = cfg[tk]; const r1 = await post({ ticker: c.ticker, action: 'exit' }); await wait(1200); const r2 = await post({ ticker: c.ticker, action: 'cancel' });
@@ -244,6 +259,7 @@
       if (ev.type === 'armed') log(`armada ${ev.pend.regla} ${ev.pend.leg} en ${ev.pend.k} · dispara en ${ev.pend.trig.toFixed(2)}`, tk);
       else if (ev.type === 'cancel') log(`cancelada ${ev.pend.regla} en ${ev.pend.k}${ev.why ? ' (' + ev.why + ')' : ''}`, tk);
       else if (ev.type === 'tighten') log(`trailing apretado a 3 pts (siguiente strike verde)`, tk);
+      else if (ev.type === 'trail') { if (ev.pos.sent) await sendTrail(tk, ev.pos); }
       else if (ev.type === 'exit') {
         const R = ev.pts / Math.abs(ev.pos.e - ev.pos.st0); if (ev.pos.sent) S.R[tk] += R; // solo cuentan las operaciones enviadas
         if (ev.pos.sent) await sendExit(tk, ev.why);
@@ -271,6 +287,7 @@
         if (age > 180) { log(`datos atrasados ${Math.round(age)} s: no se evalúa`, tk); return; }
         if (S.last[tk] && nyHM(S.last[tk]) === nyHM(snap.t)) return; // mismo minuto
         S.last[tk] = snap.t;
+        S.px = S.px || {}; S.px[tk] = snap.spot;
         await handle(tk, S.eng[tk].onMinute(snap));
         if (S.errTk && S.errTk[tk]) { log('datos de nuevo disponibles', tk); S.errTk[tk] = null; }
       } catch (e) { S.err = e.message; S.errTk = S.errTk || {}; if (!S.errTk[tk]) { S.errTk[tk] = e.message; log('error de datos: ' + e.message + ' (no se evalúa hasta que vuelvan; no se repite este aviso)', tk); } }
@@ -289,7 +306,18 @@
         // Una operación del modelo ya abierta se conserva como fantasma (no se envía: entrar tarde sería perseguir el precio)
         // para que el motor siga idéntico al backtest; una orden armada sigue viva y se envía si se dispara.
         const st = S.eng[tk].state;
-        if (st.pos) { st.pos.sent = false; log(`al cargar el historial el modelo ya estaba en ${st.pos.d > 0 ? 'COMPRA' : 'VENTA'} ${st.pos.regla} en ${st.pos.k} (entrada ${st.pos.e.toFixed(2)}): se sigue sin enviarla`, tk); }
+        if (st.pos) {
+          st.pos.sent = false; const pos = st.pos; const p = h.length ? h[h.length - 1].spot : NaN; const R0 = Math.abs(pos.e - pos.st0);
+          const desv = (p - pos.e) * pos.d; // + a favor, - en contra, en puntos del índice
+          const txt = `al cargar el historial el modelo ya estaba en ${pos.d > 0 ? 'COMPRA' : 'VENTA'} ${pos.regla} en ${pos.k} (entrada ${pos.e.toFixed(2)}, stop ${pos.st.toFixed(2)}, precio ${isFinite(p) ? p.toFixed(2) : '?'})`;
+          // Se ejecuta tarde solo si el precio sigue a menos de medio R de la entrada original y lejos del stop: así no se persigue el precio
+          if (RUN && isFinite(p) && Math.abs(desv) <= 0.5 * R0 && (p - pos.st) * pos.d >= 0.5 * R0 && !S.apagado && cfg[tk].activo) {
+            log(txt + ': todavía cerca de la entrada, se envía ahora', tk);
+            const tarde = Object.assign({}, pos, { e: p, st0: pos.st, tp: pos.tp ? Math.max(0, pos.tp - desv) : null });
+            S.px = S.px || {}; S.px[tk] = p;
+            if (await sendEntry(tk, tarde)) { pos.sent = true; pos.qty = tarde.qty; pos.eFill = tarde.eFill; S.ops[tk]++; }
+          } else log(txt + ': ya se alejó de la entrada, se sigue sin enviarla (no se persigue el precio)', tk);
+        }
         if (st.pend) log(`al cargar el historial había una orden armada ${st.pend.regla} en ${st.pend.k} (dispara en ${st.pend.trig.toFixed(2)}): sigue activa`, tk);
         S.last[tk] = h.length ? h[h.length - 1].t : null;
         log(`historial cargado: ${byMin.size} minutos`, tk);

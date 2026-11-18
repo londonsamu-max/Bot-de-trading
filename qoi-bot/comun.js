@@ -37,6 +37,7 @@ async function postSignal(body) {
       try { out.push(await require('./mt5').senal(body, a)); } catch (e) { out.push(`${a.nombre}: FALLÓ ${e.message}`); }
       continue;
     }
+    if (body.action === 'mover_stop') continue; // TradersPost no tiene esta acción: el stop se maneja con la salida
     const b = JSON.parse(JSON.stringify(body)); const r = root(b.ticker);
     if ((b.action === 'buy' || b.action === 'sell') && b.stopLoss && r) {
       const q = Math.floor(a.riesgoUSD / (b.stopLoss.amount * PV[r])); const max = (a.maxQty || {})[r] ?? 10;
