@@ -352,14 +352,14 @@
       try {
         const snap = await liveSnap(tk); S.err = null;
         // Si el historial del día no se pudo cargar (p. ej. sin sesión al arrancar), se carga ahora antes de evaluar
-        if (S.warmFail && S.warmFail[tk] && !(S.eng[tk] && (S.eng[tk].state.pos || S.eng[tk].state.pend)) && !(S.engF && S.engF[tk] && S.engF[tk].state.pos)) await warmTk(tk);
+        if (S.warmFail && S.warmFail[tk] && !(S.eng[tk] && (S.eng[tk].state.pos || S.eng[tk].state.pend)) && !Object.values((S.extra && S.extra[tk]) || {}).some((e) => e.state.pos || e.state.pend)) await warmTk(tk);
         const age = (Date.now() - snap.t.getTime()) / 1000; S.live[tk] = { spot: snap.spot, flip: snap.flip, age };
         if (age > 180) { log(`datos atrasados ${Math.round(age)} s: no se evalúa`, tk); return; }
         if (S.last[tk] && nyHM(S.last[tk]) === nyHM(snap.t)) return; // mismo minuto
         S.last[tk] = snap.t;
         S.px = S.px || {}; S.px[tk] = snap.spot;
         await handle(tk, S.eng[tk].onMinute(snap));
-        if (S.engF && S.engF[tk]) await handle(tk, S.engF[tk].onMinute(snap), 'F');
+        for (const [g, e] of Object.entries((S.extra && S.extra[tk]) || {})) await handle(tk, e.onMinute(snap), g);
         if (S.obs && S.obs[tk] && window.qbotNivel) { try { for (const r of S.obs[tk].onMinute(snap)) window.qbotNivel(tk, r); } catch (e) { console.warn('[QBOT] observador', e.message); } }
         if (S.errTk && S.errTk[tk]) { log('datos de nuevo disponibles', tk); S.errTk[tk] = null; }
       } catch (e) { S.err = e.message; S.errTk = S.errTk || {}; if (!S.errTk[tk]) { S.errTk[tk] = e.message; log('error de datos: ' + e.message + ' (no se evalúa hasta que vuelvan; no se repite este aviso)', tk); } }
@@ -368,26 +368,31 @@
   }
   // Motor principal (reglas A, C, D, E) y, si config.json lo pide ("motor": {"F": true, "separado": true}), un motor aparte
   // solo para la regla F: tiene su propio espacio (no le quita operaciones al principal) y sus propias posiciones en el bróker.
-  function motorCfg(tk, soloF) {
+  // Motor principal (reglas A, C, D, E) y motores aparte, uno por regla experimental activa en config.json
+  // ("motor": {"F": true, "separado": true, "G": true, "H": true, ...}). Cada uno tiene su propio espacio y sus propias
+  // posiciones en el bróker (grupo F / G / H): no le quitan operaciones al principal ni se cierran entre sí.
+  const SOLO = { F: { F: true, soloF: true }, G: { soloG: true }, H: { soloH: true } };
+  function motorCfg(tk, g) {
     const m = cfg.motor || {}; const base = { mg: TK[tk].mg, skipRebMinus: TK[tk].skip };
-    if (soloF) return Object.assign(base, m, { F: true, soloF: true });
+    if (g) return Object.assign(base, m, SOLO[g]);
     return Object.assign(base, m, m.separado ? { F: false } : {});
   }
-  const conF = () => !!(cfg.motor && cfg.motor.F && cfg.motor.separado);
+  const gruposExtra = () => { const m = cfg.motor || {}; return ['F', 'G', 'H'].filter((g) => g === 'F' ? (m.F && m.separado) : m[g]); };
+  const motores = (tk) => [[S.eng[tk], '']].concat(Object.entries((S.extra && S.extra[tk]) || {}).map(([g, e]) => [e, g])); // [motor, grupo]
   async function warmup() { for (const tk of ['SPX', 'QQQ']) await warmTk(tk); }
   async function warmTk(tk) {
     S.warmFail = S.warmFail || {}; S.warmFail[tk] = false;
     {
-      S.eng[tk] = window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, false) });
-      S.engF = S.engF || {}; S.engF[tk] = conF() ? window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, true) }) : null;
+      S.eng[tk] = window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, '') });
+      S.extra = S.extra || {}; S.extra[tk] = {}; for (const g of gruposExtra()) S.extra[tk][g] = window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, g) });
       S.obs = S.obs || {}; S.obs[tk] = window.QOIObs ? window.QOIObs({ sc: TK[tk].sc, mg: TK[tk].mg }) : null; // observador: solo registra
       try {
         const h = (await get('/historial', { ticker: tk, exps: '0dte', day: nyDate() })).map(histSnap).filter(Boolean);
         const byMin = new Map(); for (const s of h) byMin.set(nyHM(s.t), s);
-        for (const s of byMin.values()) { S.eng[tk].onMinute(s); if (S.engF[tk]) S.engF[tk].onMinute(s); if (S.obs[tk]) S.obs[tk].onMinute(s); } // lo ya registrado antes del reinicio no se repite
+        for (const s of byMin.values()) { for (const [e] of motores(tk)) e.onMinute(s); if (S.obs[tk]) S.obs[tk].onMinute(s); } // lo ya registrado antes del reinicio no se repite
         // Una operación del modelo ya abierta se conserva como fantasma (no se envía: entrar tarde sería perseguir el precio)
         // para que el motor siga idéntico al backtest; una orden armada sigue viva y se envía si se dispara.
-        for (const [eng, g] of [[S.eng[tk], ''], [S.engF[tk], 'F']]) {
+        for (const [eng, g] of motores(tk)) {
           if (!eng) continue; const st = eng.state; const L = g ? tk + '·' + g : tk;
         if (st.pos) {
           st.pos.sent = false; const pos = st.pos; const p = h.length ? h[h.length - 1].spot : NaN; const R0 = Math.abs(pos.e - pos.st0);
@@ -418,7 +423,7 @@
   function pause() { clearInterval(S.timer); S.running = false; log('pausado (no cierra posiciones)'); }
   async function kill() {
     S.apagado = true; clearInterval(S.timer); S.running = false;
-    for (const tk of ['SPX', 'QQQ']) { for (const [e, g] of [[S.eng[tk], ''], [S.engF && S.engF[tk], 'F']]) { if (e) { e.state.pos = null; e.state.pend = null; } if (e || !g) await sendExit(tk, 'apagado manual', g); } }
+    for (const tk of ['SPX', 'QQQ']) { for (const [e, g] of motores(tk)) { if (e) { e.state.pos = null; e.state.pend = null; } await sendExit(tk, 'apagado manual', g); } }
     log('APAGADO: se mandó cierre y cancelación en los dos instrumentos');
   }
   function askRatio() {
@@ -471,7 +476,7 @@
       else if (k === 'APAGAR TODO' && confirm('¿Cerrar posiciones, cancelar órdenes y apagar el bot?')) kill(); render(); });
     document.body.appendChild(box); render();
   }
-  window.QBOT = { start, pause, kill, cfg: () => cfg, state: S, get running() { return S.running; }, _test: { handle, histSnap, post, setCfg: (c) => { cfg = Object.assign(cfg, c); }, newEngines: () => { S.engF = S.engF || {}; for (const tk of ['SPX', 'QQQ']) { S.eng[tk] = window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, false) }); S.engF[tk] = conF() ? window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, true) }) : null; } } } };
+  window.QBOT = { start, pause, kill, cfg: () => cfg, state: S, get running() { return S.running; }, _test: { handle, histSnap, post, setCfg: (c) => { cfg = Object.assign(cfg, c); }, newEngines: () => { S.extra = S.extra || {}; for (const tk of ['SPX', 'QQQ']) { S.eng[tk] = window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, '') }); S.extra[tk] = {}; for (const g of gruposExtra()) S.extra[tk][g] = window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, g) }); } } } };
   async function autoRatio() {
     if (!RUN || !window.qbotNQ || !cfg.QQQ.activo) return;
     try { const nq = await window.qbotNQ(); const tr = await get('/trace', { ticker: 'QQQ', exps: '0dte' });

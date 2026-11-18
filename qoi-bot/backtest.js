@@ -59,6 +59,7 @@ const nyHM = (t) => new Date(t.toLocaleString('en-US', { timeZone: 'America/New_
       const base = { mg: TK[tk].mg, skipRebMinus: TK[tk].skip };
       const motores = [{ g: '', eng: bot.QOIEngine({ sc: TK[tk].sc, cfg: Object.assign({}, base, m, m.separado ? { F: false } : {}, process.env.QBOT_SOLOF ? { F: true, soloF: true, FSL: 8, FMG: 0.15, FTR: [1, 1] } : {}, extra) }) }];
       if (m.F && m.separado && !process.env.QBOT_SOLOF) motores.push({ g: 'F', eng: bot.QOIEngine({ sc: TK[tk].sc, cfg: Object.assign({}, base, m, { F: true, soloF: true }, extra) }) });
+      if (!process.env.QBOT_SOLOF && !process.env.QBOT_EXTRA) for (const [g, solo] of [['G', { soloG: true }], ['H', { soloH: true }]]) if (m[g]) motores.push({ g, eng: bot.QOIEngine({ sc: TK[tk].sc, cfg: Object.assign({}, base, m, solo, extra) }) });
       let Rdia = 0; for (const mo of motores) { mo.n = 0; mo.abierta = null; }
       for (const s of porMin.values()) {
         for (const mo of motores) for (const ev of mo.eng.onMinute(s)) {
