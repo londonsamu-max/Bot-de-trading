@@ -17,7 +17,7 @@
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
       F: false, FSL: 8, FMG: 0, FTR: null, soloF: false,
       // Reglas experimentales (apagadas): G = venta en el call wall llegando desde abajo; H = ruptura en barra mediana
-      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, oiN: 0, oiPct: 0.9, favTR: null, favMax: 0, favNoTP: false, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, oiN: 0, oiPct: 0.9, favTR: null, favMax: 0, favNoTP: false, chopN: 0, chopDist: 0, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -47,7 +47,7 @@
       if (TRr) { const R0 = Math.abs(e - stop); Object.assign(lg, { act: TRr[0] * R0, dist: TRr[1] * R0, tg: null, maxn: 120 }); }
       // Operaciones A FAVOR del régimen (compra arriba del flip / venta debajo): gestión propia opcional (en prueba)
       //   favTR [a, b]: trailing desde +a R a b R (solo si la regla no tiene el suyo) · favMax: minutos máximos · favNoTP: sin objetivo fijo
-      lg.favor = isFinite(s.flip) ? (e - s.flip) * d > 0 : null;
+      lg.favor = isFinite(s.flip) ? (e - s.flip) * d > 0 : null; lg.cruces = st.cruces || 0; lg.dFlip = isFinite(s.flip) ? Math.abs(e - s.flip) / sc : null;
       if (lg.favor) {
         const R0 = Math.abs(e - stop);
         if (C.favTR && !TRr) Object.assign(lg, { act: C.favTR[0] * R0, dist: C.favTR[1] * R0, tg: null });
@@ -95,6 +95,7 @@
       const p = s.spot; if (!isFinite(p)) return st.events;
       const mm = nyMin(s.t); if (mm >= 960) return st.events;
       st.n += 1; const n = st.n; st.hist.push(p); if (st.hist.length > 200) st.hist.shift();
+      if (isFinite(s.flip)) { const sd = sign(p - s.flip); if (st.flipSide && sd && sd !== st.flipSide) st.cruces = (st.cruces || 0) + 1; if (sd) st.flipSide = sd; } // cruces del gamma flip en el día
       const H = st.hist; const prevAt = (len) => H.slice(Math.max(0, H.length - 1 - len), H.length - 1);
       if (st.pos && st.pos.n0 === n) return st.events;
       if (st.pos) { manage(s, n, p, mm); return st.events; }
@@ -122,7 +123,7 @@
           side = sign(prev.reduce((a, v) => a + v, 0) / prev.length - k); if (!side) continue;
         }
         st.last[k] = n;
-        if (C.soloG) { if (side < 0) { st.pos = openLeg(s, n, p, -1, k + P(C.GSL), 'rebote', 'G', k, tipo, '', 'venta call wall G'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; } continue; }
+        if (C.soloG) { if (side < 0 && !((C.chopN && (st.cruces || 0) >= C.chopN) || (C.chopDist && isFinite(s.flip) && Math.abs(p - s.flip) < P(C.chopDist)))) { st.pos = openLeg(s, n, p, -1, k + P(C.GSL), 'rebote', 'G', k, tipo, '', 'venta call wall G'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; } continue; }
         if (C.soloH) { const d = -side; st.pend = { n0: n, t0: s.t, d, trig: k + d * P(C.HBRK), stop: k - d * P(C.HSL), cancel: k - d * P(8), wait: C.HWAIT, regla: 'H', k, tipo, info: '', leg: (d > 0 ? 'compra' : 'venta') + ' ruptura H' }; emit({ type: 'armed', t: s.t, pend: st.pend }); break; }
         if (tipo === 'gexF') { if (sk.gf < 0 && side < 0 && sk.op > sk.oc) { st.pos = openLeg(s, n, p, -1, k + P(C.FSL), 'rebote', 'F', k, tipo, '', 'venta rechazo F'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; } continue; }
         const g = sk.gf, oc = sk.oc, op = sk.op, scs = sk.sc, sps = sk.sp;
@@ -141,6 +142,9 @@
         if (g < 0 && side > 0 && sps < 0 && op > oc) { if (C.noRepeat && st.failed['E' + k]) continue; st.pend = { n0: n, t0: s.t, d: -1, trig: k - P(C.E.brk), stop: k - P(C.E.brk) + P(C.E.sl), cancel: k + P(15), wait: 90, regla: 'E', k, tipo, info, leg: 'venta ruptura E' }; emit({ type: 'armed', t: s.t, pend: st.pend }); break; }
         // Regla F (experimental, apagada por defecto)
         if (C.F && g < 0 && side < 0 && op > oc) { st.pos = openLeg(s, n, p, -1, k + P(C.FSL), 'rebote', 'F', k, tipo, info, 'venta rechazo F'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; }
+        // Día picado alrededor del flip (en prueba): chopN = cruces del flip en el día, chopDist = distancia al flip (pts SPX).
+        // Con chop, no se operan los rebotes (C rebote y G); las rupturas siguen.
+        const chop = (C.chopN && (st.cruces || 0) >= C.chopN) || (C.chopDist && isFinite(s.flip) && Math.abs(p - s.flip) < P(C.chopDist));
         // Regla C
         if (g > 0) {
           const cls = oc >= op ? (scs > 0 ? 'calls vendidos' : 'calls comprados') : (sps > 0 ? 'puts vendidos' : 'puts comprados');
@@ -152,6 +156,7 @@
           let cruces = 0; for (let i = 1; i < past.length; i++) if (past[i] !== past[i - 1]) cruces++;
           const SL = (reg > 0 && cruces >= 2) ? 12 : 8;
           if (dc === 'DEX alto charm+') { st.pend = { n0: n, t0: s.t, d: -d, trig: k - d * P(SL), stop: k + d * P(8), cancel: null, wait: 120, regla: 'C', k, tipo, info, leg: 'ruptura (solo)' }; emit({ type: 'armed', t: s.t, pend: st.pend }); break; }
+          if (chop) { st.last[k] = n; continue; }
           st.pos = openLeg(s, n, p, d, k - d * P(SL), 'rebote', 'C', k, tipo, info + ` · stop ${SL}`, 'rebote'); st.pos.sar = C.sarTodo || dc !== 'DEX- charm-';
           emit({ type: 'entry', t: s.t, pos: st.pos }); break;
         }
