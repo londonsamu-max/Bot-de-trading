@@ -73,6 +73,8 @@
     "H": true,
     "HBRK": 5,
     "HSL": 8,
-    "HWAIT": 30
+    "HWAIT": 30,
+    "cdNivel": 5,
+    "cdSalida": 15
   }
 }
