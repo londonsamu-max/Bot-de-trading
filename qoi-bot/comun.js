@@ -28,10 +28,15 @@ const PV = { MES: 5, MNQ: 2, ES: 50, NQ: 20 };
 const root = (t) => (t.match(/^(MES|MNQ|ES|NQ)/) || [])[1];
 async function postSignal(body) {
   const c = readCfg(); // se relee cada vez: cambiar config.json a "papel" detiene los envíos al instante
-  const cuentas = (c.cuentas || []).filter((a) => a.activa && a.webhook);
+  const cuentas = (c.cuentas || []).filter((a) => a.activa && (a.webhook || a.tipo === 'mt5'));
   if (c.modo !== 'demo' || !cuentas.length) return { ok: true, papel: true };
   const out = [];
   for (const a of cuentas) {
+    if (a.tipo === 'mt5') { // MetaTrader 5 por el puente de archivos del EA (ver mt5.js)
+      if (body.action === 'cancel') continue; // en MT5 las órdenes son a mercado: no hay pendientes que cancelar
+      try { out.push(await require('./mt5').senal(body, a)); } catch (e) { out.push(`${a.nombre}: FALLÓ ${e.message}`); }
+      continue;
+    }
     const b = JSON.parse(JSON.stringify(body)); const r = root(b.ticker);
     if ((b.action === 'buy' || b.action === 'sell') && b.stopLoss && r) {
       const q = Math.floor(a.riesgoUSD / (b.stopLoss.amount * PV[r])); const max = (a.maxQty || {})[r] ?? 10;

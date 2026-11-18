@@ -1,5 +1,5 @@
 {
-  "modo": "papel",
+  "modo": "demo",
   "riesgoUSD": 250,
   "maxPerdidaR": 3,
   "maxOps": 8,
@@ -18,9 +18,24 @@
   "verVentana": true,
   "cuentas": [
     {
+      "nombre": "MT5 Pepperstone demo",
+      "tipo": "mt5",
+      "activa": true,
+      "riesgoUSD": 250,
+      "usdPorPuntoLote": {
+        "US500": 1,
+        "NAS100": 1
+      },
+      "maxLotes": {
+        "US500": 10,
+        "NAS100": 10
+      },
+      "cuentaPermitida": null
+    },
+    {
       "nombre": "Tradovate demo",
       "webhook": "",
-      "activa": true,
+      "activa": false,
       "riesgoUSD": 250,
       "maxQty": {
         "MES": 10,

@@ -53,7 +53,7 @@ async function correr() {
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(DIR, 'bot.js'), 'utf8'), ctx, { filename: 'bot.js' });
 
-  sys(`bot iniciado SIN NAVEGADOR en modo ${c.modo.toUpperCase()} · cuentas activas: ${(c.cuentas || []).filter((a) => a.activa && a.webhook).map((a) => a.nombre).join(', ') || 'ninguna (no se envía nada)'}`);
+  sys(`bot iniciado SIN NAVEGADOR en modo ${c.modo.toUpperCase()} · cuentas activas: ${(c.cuentas || []).filter((a) => a.activa && (a.webhook || a.tipo === 'mt5')).map((a) => a.nombre).join(', ') || 'ninguna (no se envía nada)'}`);
 
   const end = hhmm(c.cerrarHoraNY || '16:10');
   const salir = (msg, code = 0) => { sys(msg); clearInterval(timer); process.exit(code); };

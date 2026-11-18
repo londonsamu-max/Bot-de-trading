@@ -56,7 +56,7 @@ const { readCfg, nyNow, hhmm, sys, writeLog, postSignal, getNQ } = require('./co
     const r = await page.evaluate(async () => ({ cargado: !!window.QBOT, corriendo: window.QBOT && window.QBOT.running, envio: await window.qbotPost({ ticker: 'MESZ2026', action: 'sell', quantity: 3, stopLoss: { type: 'stop', amount: 16 } }), salida: await window.qbotPost({ ticker: 'MESZ2026', action: 'exit' }) }));
     console.log('PRUEBA', JSON.stringify(r)); await ctx.close(); process.exit(0);
   }
-  sys(`bot iniciado en modo ${c.modo.toUpperCase()} · cuentas activas: ${(c.cuentas || []).filter((a) => a.activa && a.webhook).map((a) => a.nombre).join(', ') || 'ninguna (no se envía nada)'}`);
+  sys(`bot iniciado en modo ${c.modo.toUpperCase()} · cuentas activas: ${(c.cuentas || []).filter((a) => a.activa && (a.webhook || a.tipo === 'mt5')).map((a) => a.nombre).join(', ') || 'ninguna (no se envía nada)'}`);
 
   // Vigilancia: si la página no tiene sesión, avisa; si el bot se cae, recarga; a la hora de cierre, termina.
   const end = hhmm(c.cerrarHoraNY || '16:10');
