@@ -17,7 +17,7 @@
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
       F: false, FSL: 8, FMG: 0, FTR: null, soloF: false,
       // Reglas experimentales (apagadas): G = venta en el call wall llegando desde abajo; H = ruptura en barra mediana
-      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -132,7 +132,8 @@
         // Regla C
         if (g > 0) {
           const cls = oc >= op ? (scs > 0 ? 'calls vendidos' : 'calls comprados') : (sps > 0 ? 'puts vendidos' : 'puts comprados');
-          if (!((cls === 'calls vendidos' && side < 0) || (cls === 'puts vendidos' && side > 0))) continue;
+          // cAmbos (en prueba): barra verde con calls Y puts vendidos sostiene por los dos lados, domine quien domine
+          if (!((cls === 'calls vendidos' && side < 0) || (cls === 'puts vendidos' && side > 0) || (C.cAmbos && scs > 0 && sps > 0))) continue;
           if (C.skipRebMinus && dc === 'DEX- charm-') continue;
           const d = side;
           const past = H.slice(Math.max(0, H.length - 61)).map(v => sign(v - k)).filter(x => x !== 0);
