@@ -66,10 +66,10 @@ const nyHM = (t) => new Date(t.toLocaleString('en-US', { timeZone: 'America/New_
         for (const mo of motores) for (const ev of mo.eng.onMinute(s)) {
           if (ev.type === 'entry') {
             const bloqueada = mo.n >= cfg.maxOps || Rdia <= -cfg.maxPerdidaR;
-            mo.abierta = bloqueada ? null : ev.pos; if (!bloqueada) mo.n++;
+            mo.abierta = bloqueada ? null : ev.pos; if (!bloqueada) { mo.n++; mo.hEnt = nyHM(s.t); }
           } else if (ev.type === 'exit' && mo.abierta === ev.pos) {
             const riesgo = Math.abs(ev.pos.e - ev.pos.st0); const R = ev.pts / riesgo; Rdia += R; mo.abierta = null;
-            ops.push({ tk, d, hora: nyHM(ev.pos.t || ev.t), regla: `${ev.pos.regla} ${ev.pos.leg || ''}`.trim(), lado: ev.pos.d > 0 ? 'compra' : 'venta', R, pts: ev.pts, why: ev.why });
+            ops.push({ tk, d, hora: mo.hEnt || nyHM(ev.pos.t0 || ev.t), horaSal: nyHM(ev.t), motor: mo.g || 'principal', regla: `${ev.pos.regla} ${ev.pos.leg || ''}`.trim(), lado: ev.pos.d > 0 ? 'compra' : 'venta', R, pts: ev.pts, why: ev.why, e: ev.pos.e, st0: ev.pos.st0, px: ev.px, k: ev.pos.k, tipo: ev.pos.tipo || '' });
           }
         }
       }
@@ -95,6 +95,7 @@ const nyHM = (t) => new Date(t.toLocaleString('en-US', { timeZone: 'America/New_
   const reglas = [...new Set(ops.map((o) => o.regla))];
   console.log('\nPor regla:');
   for (const r of reglas) { const l = ops.filter((o) => o.regla === r); const t = l.reduce((a, o) => a + o.R, 0); console.log(`  ${r.padEnd(14)} ${String(l.length).padStart(3)} ops · ${(100 * l.filter((o) => o.R > 0).length / l.length).toFixed(0)}% aciertos · ${t >= 0 ? '+' : ''}${t.toFixed(2)} R`); }
+  fs.writeFileSync(path.join(DIR, 'registros', 'backtest_operaciones.json'), JSON.stringify(ops));
   const f = path.join(DIR, 'registros', 'backtest_operaciones.csv');
   fs.writeFileSync(f, 'instrumento;dia;hora_NY;regla;lado;R;puntos;salida\n' + ops.map((o) => [o.tk, o.d, o.hora, o.regla, o.lado, o.R.toFixed(3), o.pts.toFixed(2), o.why].join(';')).join('\n'));
   console.log(`\nDetalle de cada operación: ${f}`);
