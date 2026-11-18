@@ -79,7 +79,7 @@
     "favMax": 240,
     "riesgoContra": 0.5,
     "volumen": true,
-    "lejosNodos": 1.5,
+    "lejosNodos": 1,
     "dentroValor": 0.5,
     "redondos": 1.5,
     "riesgoMax": 1.5
