@@ -195,8 +195,12 @@
       const c = cells.get(+k); const s = SG.get(+k) || [k, 0, 0]; const sc = Math.sign(s[1]), sp = Math.sign(s[2]); let gf;
       if (c && c.gex_call != null && c.gex_put != null) gf = sc * Math.abs(c.gex_call) + sp * Math.abs(c.gex_put);
       else { const g = tr.gex_strike[i] || 0, oc = tr.oi_call[i] || 0, op = tr.oi_put[i] || 0; gf = (sc > 0 && sp < 0) ? g : (sc < 0 && sp > 0) ? -g : Math.abs(g) * ((op >= oc ? sp : sc) || 1); }
-      const g3 = S.vcache[tk] ? S.vcache[tk].get(+k) : null;
-      return { k: +k, oc: tr.oi_call[i] || 0, op: tr.oi_put[i] || 0, sc, sp, gf, dx: g3 ? g3[0] : NaN, ch: g3 ? g3[1] : NaN };
+      // DEX y charm firmados del mismo minuto, desde la matriz en vivo (igual que dex/charm_strike_flujo del historial:
+      // signo del flujo × valor de calls + signo × valor de puts). Si la matriz no los trae, se usa la caché del historial.
+      let dx, ch;
+      if (c && c.dex_call != null && c.dex_put != null && c.charm_call != null && c.charm_put != null && (sc || sp)) { dx = sc * c.dex_call + sp * c.dex_put; ch = sc * c.charm_call + sp * c.charm_put; }
+      else { const g3 = S.vcache[tk] ? S.vcache[tk].get(+k) : null; dx = g3 ? g3[0] : NaN; ch = g3 ? g3[1] : NaN; }
+      return { k: +k, oc: tr.oi_call[i] || 0, op: tr.oi_put[i] || 0, sc, sp, gf, dx, ch };
     });
     const ts = typeof tr.ts === 'number' ? new Date(tr.ts < 1e12 ? tr.ts * 1000 : tr.ts) : new Date(tr.ts);
     return { t: ts, spot: tr.spot, flip: tr.gamma_flip ?? NaN, cw: tr.call_wall ?? NaN, pw: tr.put_wall ?? NaN, strikes };
@@ -241,7 +245,7 @@
       else if (ev.type === 'cancel') log(`cancelada ${ev.pend.regla} en ${ev.pend.k}${ev.why ? ' (' + ev.why + ')' : ''}`, tk);
       else if (ev.type === 'tighten') log(`trailing apretado a 3 pts (siguiente strike verde)`, tk);
       else if (ev.type === 'exit') {
-        const R = ev.pts / Math.abs(ev.pos.e - ev.pos.st0); S.R[tk] += R;
+        const R = ev.pts / Math.abs(ev.pos.e - ev.pos.st0); if (ev.pos.sent) S.R[tk] += R; // solo cuentan las operaciones enviadas
         if (ev.pos.sent) await sendExit(tk, ev.why);
         log(`salida ${ev.why} · ${ev.pts >= 0 ? '+' : ''}${ev.pts.toFixed(2)} pts del índice (${R >= 0 ? '+' : ''}${R.toFixed(2)} R) · día ${S.R[tk].toFixed(2)} R`, tk);
       } else if (ev.type === 'entry') {
@@ -282,7 +286,11 @@
         const h = (await get('/historial', { ticker: tk, exps: '0dte', day: nyDate() })).map(histSnap).filter(Boolean);
         const byMin = new Map(); for (const s of h) byMin.set(nyHM(s.t), s);
         for (const s of byMin.values()) S.eng[tk].onMinute(s);
-        const st = S.eng[tk].state; if (st.pos || st.pend) { log(`al arrancar había una operación del modelo abierta o armada; se descarta (no está en tu cuenta)`, tk); st.pos = null; st.pend = null; }
+        // Una operación del modelo ya abierta se conserva como fantasma (no se envía: entrar tarde sería perseguir el precio)
+        // para que el motor siga idéntico al backtest; una orden armada sigue viva y se envía si se dispara.
+        const st = S.eng[tk].state;
+        if (st.pos) { st.pos.sent = false; log(`al cargar el historial el modelo ya estaba en ${st.pos.d > 0 ? 'COMPRA' : 'VENTA'} ${st.pos.regla} en ${st.pos.k} (entrada ${st.pos.e.toFixed(2)}): se sigue sin enviarla`, tk); }
+        if (st.pend) log(`al cargar el historial había una orden armada ${st.pend.regla} en ${st.pend.k} (dispara en ${st.pend.trig.toFixed(2)}): sigue activa`, tk);
         S.last[tk] = h.length ? h[h.length - 1].t : null;
         log(`historial cargado: ${byMin.size} minutos`, tk);
       } catch (e) { S.warmFail[tk] = true; log('no se pudo cargar el historial: ' + e.message + ' (se recarga cuando vuelvan los datos)', tk); }
