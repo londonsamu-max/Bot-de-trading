@@ -284,7 +284,7 @@
   async function start() {
     if (S.running) return; S.apagado = false;
     if (cfg.QQQ.activo && !cfg.QQQ.ratio && !RUN) askRatio();
-    S.running = true; S.day = null; log(`iniciado en modo ${cfg.modo.toUpperCase()}`); await step(); S.timer = setInterval(() => { if (!S.busy) { S.busy = true; step().finally(() => { S.busy = false; }); } }, 5000);
+    S.running = true; S.day = null; log(`iniciado en modo ${cfg.modo.toUpperCase()}`); await step(); S.timer = setInterval(() => { if (!S.busy) { S.busy = true; step().finally(() => { S.busy = false; }); } }, cfg.pollMs || 5000);
   }
   function pause() { clearInterval(S.timer); S.running = false; log('pausado (no cierra posiciones)'); }
   async function kill() {

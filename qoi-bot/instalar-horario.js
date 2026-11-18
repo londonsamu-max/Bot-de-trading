@@ -1,3 +1,4 @@
+// caffeinate -i evita que el Mac se duerma mientras el bot corre (no evita el reposo al cerrar la tapa).
 // Programa el bot para que arranque solo de lunes a viernes a las 8:20 hora local (Colombia),
 // que cubre la apertura de las 9:30 NY tanto en invierno como en verano. El bot se cierra solo a las 16:10 NY.
 // Uso: node instalar-horario.js            (instala)
@@ -23,7 +24,7 @@ if (process.platform === 'darwin') {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>${label}</string>
-<key>ProgramArguments</key><array><string>${NODE}</string><string>${path.join(DIR, 'runner.js')}</string></array>
+<key>ProgramArguments</key><array><string>/usr/bin/caffeinate</string><string>-i</string><string>${NODE}</string><string>${path.join(DIR, 'runner.js')}</string></array>
 <key>WorkingDirectory</key><string>${DIR}</string>
 <key>StartCalendarInterval</key><array>${days}</array>
 <key>StandardOutPath</key><string>${path.join(DIR, 'registros', 'consola.log')}</string>

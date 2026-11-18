@@ -28,7 +28,8 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 function estado() {
   const s = leerJson(STATUS);
   if (!s) return { ok: false, error: 'el EA no ha escrito su estado: abre MT5 y pon SpotGammaBridge en un gráfico' };
-  const edad = (Date.now() - new Date(String(s.timestamp).replace(' ', 'T')).getTime()) / 1000;
+  // El EA escribe la hora del servidor del bróker (NY+7), no la del Mac: se mide la edad por la fecha del archivo.
+  let edad = Infinity; try { edad = (Date.now() - fs.statSync(STATUS).mtimeMs) / 1000; } catch (e) {}
   if (!(edad < 30)) return { ok: false, error: `el EA no responde hace ${Math.round(edad)} s (¿MT5 abierto y con AutoTrading?)`, s };
   return { ok: true, s };
 }
@@ -85,15 +86,17 @@ async function senal(body, cuenta) {
     return `${cuenta.nombre}: OK ${largo ? 'compra' : 'venta'} ${real} lotes ${cfd}${real < lotes ? ` (pedidos ${lotes}: el EA los recortó)` : ''} @ ${res.price} · stop ${sl.toFixed(1)} · ticket ${res.ticket} · ${res.ms} ms`;
   }
   if (body.action === 'exit') {
+    // Se intenta cerrar cada ticket del bot sin mirar el estado (el EA lo actualiza cada pocos segundos y
+    // una posición recién abierta podría no aparecer aún). "Posicion no encontrada" = ya la cerró el stop u objetivo.
     const t = leerTickets(); const mios = t[cfd] || [];
-    const abiertos = new Set((e.s.openPositions || []).map((p) => Number(p.ticket)));
-    const out = [];
+    const out = []; const quedan = [];
     for (const k of mios) {
-      if (!abiertos.has(Number(k))) continue; // ya cerrada (stop u objetivo)
       const res = await enviar({ action: 'close_position', ticket: k, volume: 0 });
-      out.push(`${k} ${res.success ? 'cerrada' : 'FALLÓ ' + (res.error || res.retcode)}`);
+      if (res.success) out.push(`${k} cerrada (${res.ms} ms)`);
+      else if (/no encontrada/i.test(res.error || '')) out.push(`${k} ya estaba cerrada`);
+      else { out.push(`${k} FALLÓ ${res.error || res.retcode}`); quedan.push(k); }
     }
-    t[cfd] = mios.filter((k) => out.some((x) => x.startsWith(k + ' FALLÓ'))); guardarTickets(t);
+    t[cfd] = quedan; guardarTickets(t);
     return `${cuenta.nombre}: ${out.length ? out.join(', ') : `sin posiciones del bot en ${cfd}`}`;
   }
   return `${cuenta.nombre}: ${body.action} no aplica en MT5 (órdenes a mercado)`;

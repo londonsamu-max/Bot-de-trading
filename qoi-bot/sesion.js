@@ -58,4 +58,4 @@ const accessToken = () => (ses ? ses.access_token : null);
 // Lo que bot.js lee de localStorage con la clave sb-...-auth-token
 const comoLocalStorage = () => (ses ? JSON.stringify(ses) : null);
 
-module.exports = { asegurar, accessToken, comoLocalStorage, minutosRestantes, TOKEN_PATH };
+module.exports = { renovarYa: async () => { if (!ses) ses = leer(); await renovar(); }, asegurar, accessToken, comoLocalStorage, minutosRestantes, TOKEN_PATH };

@@ -29,7 +29,7 @@ const root = (t) => (t.match(/^(MES|MNQ|ES|NQ)/) || [])[1];
 async function postSignal(body) {
   const c = readCfg(); // se relee cada vez: cambiar config.json a "papel" detiene los envíos al instante
   const cuentas = (c.cuentas || []).filter((a) => a.activa && (a.webhook || a.tipo === 'mt5'));
-  if (c.modo !== 'demo' || !cuentas.length) return { ok: true, papel: true };
+  if (process.env.QBOT_TEST || c.modo !== 'demo' || !cuentas.length) return { ok: true, papel: true }; // las pruebas nunca operan
   const out = [];
   for (const a of cuentas) {
     if (a.tipo === 'mt5') { // MetaTrader 5 por el puente de archivos del EA (ver mt5.js)
@@ -62,4 +62,11 @@ async function getNQ() {
   return null;
 }
 
-module.exports = { DIR, readCfg, nyNow, nyDate, hhmm, writeLog, sys, postSignal, getNQ };
+// Notificación de macOS (aparece en la esquina de la pantalla y en el centro de notificaciones)
+function avisar(titulo, texto) {
+  if (process.platform !== 'darwin') return;
+  const q = (x) => JSON.stringify(String(x || '').replace(/[\r\n]/g, ' ').slice(0, 200));
+  try { require('child_process').execFile('osascript', ['-e', `display notification ${q(texto)} with title "Bot Q OI" subtitle ${q(titulo)}`]); } catch (e) {}
+}
+
+module.exports = { avisar, DIR, readCfg, nyNow, nyDate, hhmm, writeLog, sys, postSignal, getNQ };

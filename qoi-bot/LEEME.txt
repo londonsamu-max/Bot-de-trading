@@ -48,3 +48,10 @@ MetaTrader 5 (Pepperstone demo) — sin TradersPost
   Parámetros del EA: InpMaxLotSize 10, InpOrderPollMs 100.
 - Solo opera si la cuenta es DEMO y solo cierra las posiciones que abrió el bot (registros/mt5_tickets.json).
 - Probar: node mt5-probar.js   (estado)   ·   node mt5-probar.js --orden   (0.1 lote US500 y cierra)
+
+Ver y comprobar rápido
+- npm run ver      -> lo que hace el bot en vivo (Ctrl+C para salir; el bot sigue corriendo)
+- npm run probar   -> token de Quantium + API + estado de MT5, en segundos
+- Cada orden, fallo, apagado o problema de sesión llega como notificación del Mac ("Bot Q OI").
+- El bot revisa Quantium cada pollMs (config.json, 2000 = 2 s); la orden llega a MT5 en ~0.2 s.
+- Mientras corre, el Mac no se duerme (caffeinate). Si MT5 está cerrado a las 8:20, el bot lo abre.
