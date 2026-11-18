@@ -55,3 +55,9 @@ Ver y comprobar rápido
 - Cada orden, fallo, apagado o problema de sesión llega como notificación del Mac ("Bot Q OI").
 - El bot revisa Quantium cada pollMs (config.json, 2000 = 2 s); la orden llega a MT5 en ~0.2 s.
 - Mientras corre, el Mac no se duerme (caffeinate). Si MT5 está cerrado a las 8:20, el bot lo abre.
+
+Registro de niveles (estudio; no opera)
+- El bot anota cada llegada del precio a un nivel (calls, puts, gamma, flujo, DEX/charm, de qué lado llega y si
+  rebotó o rompió 8 pts en 60 min) y cada cambio de flujo en barras parejas y altas, en registros/niveles/niveles_FECHA.jsonl.
+- npm run niveles              -> tablas con todo lo registrado (en vivo + historial)
+- npm run niveles-historial    -> rehace el historial con los días de registros/cache (correr después de npm run backtest)

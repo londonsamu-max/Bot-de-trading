@@ -9,7 +9,9 @@
     "instalar-horario": "node instalar-horario.js",
     "ver": "tail -n 40 -f registros/consola.log",
     "probar": "node runner.js --probar && node mt5-probar.js",
-    "backtest": "node backtest.js ambos 1000"
+    "backtest": "node backtest.js ambos 1000",
+    "niveles": "node niveles.js resumen",
+    "niveles-historial": "node niveles.js historial"
   },
   "dependencies": {
     "playwright": "1.47.2"

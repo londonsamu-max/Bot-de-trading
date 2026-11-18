@@ -71,6 +71,10 @@ async function correr() {
     qbotLog: async (row) => { writeLog(row); console.log(`[${row.hora} NY] ${row.tk} ${row.msg} ${row.extra || ''}`); if (/OK|FALLÓ/.test(row.extra || '') || /APAGADO|límite de pérdida/.test(row.msg)) avisar(`${row.tk} ${row.msg}`.slice(0, 120), row.extra); },
     qbotNQ: async () => (c.ratioMNQ ? null : await getNQ()),
     qbotTieneTickets: async (ticker, g) => { try { return mt5.tieneTickets(ticker, g); } catch (e) { return false; } },
+    // Observador de niveles: un registro por línea en registros/niveles/niveles_FECHA.jsonl (para estudiar, no opera)
+    qbotNivel: (tk, r) => { try { const dir = path.join(DIR, 'registros', 'niveles'); fs.mkdirSync(dir, { recursive: true });
+      const d = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+      fs.appendFileSync(path.join(dir, `niveles_${d}.jsonl`), JSON.stringify(Object.assign({ dia: d, instrumento: tk }, r)) + '\n'); } catch (e) {} },
   };
   ctx.window = ctx; ctx.globalThis = ctx;
   vm.createContext(ctx);

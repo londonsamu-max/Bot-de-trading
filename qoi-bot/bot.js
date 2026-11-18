@@ -142,6 +142,63 @@
     return { onMinute, state: st, cfg: C, flatten };
   }
   root.QOIEngine = Engine;
+
+  // ---------- Observador (no opera: solo registra para estudiar) ----------
+  // 1) Cada llegada del precio a un nivel (call wall, put wall o barra con |gamma| >= 15 % del mínimo del motor), con el mismo
+  //    criterio de llegada del motor, y si después rebotó o rompió 8 pts (escala SPX) en 60 min.
+  // 2) Cambios de flujo en barras parejas y altas (calls/puts entre 0.67 y 1.5, ambos altos) cerca del precio, y el
+  //    movimiento de los 30 min siguientes.
+  function Observer(opts) {
+    const u = opts.sc || 1; const mg = opts.mg; const P = (x) => x * u;
+    const H = []; const last = {}; const pend = []; let prev = null; const out = [];
+    const hhmm = (t) => new Date(t.toLocaleString('en-US', { timeZone: 'America/New_York' })).toTimeString().slice(0, 5);
+    const flujo = (x) => (x.sc < 0 ? 'calls comprados' : x.sc > 0 ? 'calls vendidos' : 'calls sin firma') + ' / ' + (x.sp < 0 ? 'puts comprados' : x.sp > 0 ? 'puts vendidos' : 'puts sin firma');
+    const mezcla = (x) => { const r = x.oc / Math.max(1, x.op); return r >= 0.8 && r <= 1.25 ? 'parejos' : r > 1.25 ? 'dominan calls' : 'dominan puts'; };
+    function onMinute(s) {
+      out.length = 0; const p = s.spot; if (!isFinite(p)) return out; const mm = nyMin(s.t); const hora = hhmm(s.t); H.push(p);
+      // cerrar pendientes
+      for (let i = pend.length - 1; i >= 0; i--) {
+        const e = pend[i]; e._n++;
+        if (e.tipo === 'llegada') {
+          const m = (p - e.nivel) * e._lado;
+          e.maxRebote = Math.max(e.maxRebote, m / u); e.maxRuptura = Math.max(e.maxRuptura, -m / u);
+          if (!e.resultado && m >= P(8)) { e.resultado = 'rebote'; e.minutos = e._n; }
+          if (!e.resultado && m <= -P(8)) { e.resultado = 'ruptura'; e.minutos = e._n; }
+          if (e.resultado || e._n >= 60 || mm >= 958) { if (!e.resultado) e.resultado = 'sin dirección'; delete e._lado; delete e._n; out.push(e); pend.splice(i, 1); }
+        } else {
+          e.subeMax = Math.max(e.subeMax, (p - e.precio) / u); e.bajaMax = Math.max(e.bajaMax, (e.precio - p) / u);
+          if (e._n >= 30 || mm >= 958) { e.final30 = (p - e.precio) / u; delete e._n; out.push(e); pend.splice(i, 1); }
+        }
+      }
+      if (mm < 570 || mm >= 958) { prev = s; return out; }
+      const thr = pct(s.strikes.map((x) => Math.max(x.oc, x.op)), 0.7);
+      // 1) llegadas a niveles
+      const L = new Map();
+      if (isFinite(s.cw)) L.set(s.cw, 'call wall'); if (isFinite(s.pw) && !L.has(s.pw)) L.set(s.pw, 'put wall');
+      const near = s.strikes.filter((x) => Math.abs(x.k - p) <= P(40) && isFinite(x.gf));
+      for (const x of near.slice().sort((a, b) => Math.abs(b.gf) - Math.abs(a.gf)).slice(0, 6).filter((x) => Math.max(x.oc, x.op) >= thr && Math.abs(x.gf) >= mg * 0.15).slice(0, 4)) if (!L.has(x.k)) L.set(x.k, Math.abs(x.gf) >= mg ? 'barra grande' : 'barra mediana');
+      for (const [k, tipoNivel] of L) {
+        const x = s.strikes.find((z) => z.k === k); if (!x || Math.abs(p - k) > P(1.5) || (k in last && H.length - last[k] < 15)) continue;
+        const pr = H.slice(Math.max(0, H.length - 16), H.length - 1); if (!pr.length || Math.max(...pr.map((v) => Math.abs(v - k))) < P(8)) continue;
+        const lado = sign(pr.reduce((a, v) => a + v, 0) / pr.length - k); if (!lado) continue; last[k] = H.length;
+        const nb = near.filter((z) => Math.abs(z.k - p) <= P(40));
+        pend.push({ tipo: 'llegada', hora, nivel: k, tipoNivel, precio: p, llega: lado > 0 ? 'desde arriba' : 'desde abajo', gamma: x.gf, calls: x.oc, puts: x.op, mezcla: mezcla(x),
+          ambosAltos: x.oc >= thr && x.op >= thr, flujo: flujo(x), dex: x.dx, charm: x.ch, dexRel: Math.abs(x.dx) / median(nb.map((z) => Math.abs(z.dx))),
+          flip: s.flip, regimen: p > s.flip ? '+' : '-', resultado: null, minutos: null, maxRebote: 0, maxRuptura: 0, _lado: lado, _n: 0 });
+      }
+      // 2) cambios de flujo en barras parejas y altas cerca del precio
+      if (prev) for (const x of s.strikes) {
+        if (Math.abs(x.k - p) > P(12)) continue; const r = x.oc / Math.max(1, x.op); if (r < 0.67 || r > 1.5 || x.oc < thr || x.op < thr) continue;
+        const y = prev.strikes.find((z) => z.k === x.k); if (!y || (y.sc === x.sc && y.sp === x.sp)) continue;
+        pend.push({ tipo: 'cambio de flujo', hora, nivel: x.k, precio: p, distancia: (p - x.k) / u, calls: x.oc, puts: x.op, antes: flujo(y), ahora: flujo(x),
+          gammaAntes: y.gf, gammaAhora: x.gf, ultimos5: H.length > 5 ? (p - H[H.length - 6]) / u : null, subeMax: 0, bajaMax: 0, final30: null, _n: 0 });
+      }
+      prev = s; return out;
+    }
+    function pendientes() { return pend.map((e) => Object.assign({}, e, { resultado: e.resultado || 'sin terminar' })); }
+    return { onMinute, pendientes };
+  }
+  root.QOIObs = Observer;
   if (typeof module !== 'undefined') module.exports = Engine;
 })(typeof window !== 'undefined' ? window : globalThis);
 (function () {
@@ -296,6 +353,7 @@
         S.px = S.px || {}; S.px[tk] = snap.spot;
         await handle(tk, S.eng[tk].onMinute(snap));
         if (S.engF && S.engF[tk]) await handle(tk, S.engF[tk].onMinute(snap), 'F');
+        if (S.obs && S.obs[tk] && window.qbotNivel) { try { for (const r of S.obs[tk].onMinute(snap)) window.qbotNivel(tk, r); } catch (e) { console.warn('[QBOT] observador', e.message); } }
         if (S.errTk && S.errTk[tk]) { log('datos de nuevo disponibles', tk); S.errTk[tk] = null; }
       } catch (e) { S.err = e.message; S.errTk = S.errTk || {}; if (!S.errTk[tk]) { S.errTk[tk] = e.message; log('error de datos: ' + e.message + ' (no se evalúa hasta que vuelvan; no se repite este aviso)', tk); } }
     }));
@@ -315,10 +373,11 @@
     {
       S.eng[tk] = window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, false) });
       S.engF = S.engF || {}; S.engF[tk] = conF() ? window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, true) }) : null;
+      S.obs = S.obs || {}; S.obs[tk] = window.QOIObs ? window.QOIObs({ sc: TK[tk].sc, mg: TK[tk].mg }) : null; // observador: solo registra
       try {
         const h = (await get('/historial', { ticker: tk, exps: '0dte', day: nyDate() })).map(histSnap).filter(Boolean);
         const byMin = new Map(); for (const s of h) byMin.set(nyHM(s.t), s);
-        for (const s of byMin.values()) { S.eng[tk].onMinute(s); if (S.engF[tk]) S.engF[tk].onMinute(s); }
+        for (const s of byMin.values()) { S.eng[tk].onMinute(s); if (S.engF[tk]) S.engF[tk].onMinute(s); if (S.obs[tk]) S.obs[tk].onMinute(s); } // lo ya registrado antes del reinicio no se repite
         // Una operación del modelo ya abierta se conserva como fantasma (no se envía: entrar tarde sería perseguir el precio)
         // para que el motor siga idéntico al backtest; una orden armada sigue viva y se envía si se dispara.
         for (const [eng, g] of [[S.eng[tk], ''], [S.engF[tk], 'F']]) {
