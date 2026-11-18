@@ -72,7 +72,7 @@ async function correr() {
 
   const end = hhmm(c.cerrarHoraNY || '16:10');
   const salir = (msg, code = 0) => { sys(msg); clearInterval(timer); process.exit(code); };
-  let fallos = 0;
+  let fallos = 0; let mt5Caido = false; let mt5Reabierto = 0;
   const timer = setInterval(async () => {
     const n = nyNow();
     if (n.getHours() * 60 + n.getMinutes() >= end) return salir('fin de la sesión: cerrando');
@@ -82,6 +82,15 @@ async function correr() {
     } catch (e) {
       fallos += 1; sys(`ERROR de sesión (${fallos}): ${e.message}`); if (fallos === 1) avisar('Quantium: sesión con problemas', e.message);
       if (fallos >= 3) return salir('sin sesión válida: el bot se detiene (corre "node runner.js --probar" tras copiar un token nuevo)', 1);
+    }
+    // Vigilancia de MT5: si el EA deja de responder, se reabre MetaTrader 5 (como mucho cada 3 minutos) y se avisa
+    if (c.modo === 'demo' && (readCfg().cuentas || []).some((a) => a.activa && a.tipo === 'mt5')) {
+      const e = mt5.estado();
+      if (e.ok) { if (mt5Caido) { mt5Caido = false; sys('MT5 volvió a responder'); avisar('MT5 volvió', 'El EA responde de nuevo'); } }
+      else if (Date.now() - mt5Reabierto > 180000) {
+        mt5Caido = true; mt5Reabierto = Date.now(); sys('MT5 no responde (' + e.error + '): reabriendo MetaTrader 5'); avisar('MT5 no responde', 'Reabriendo MetaTrader 5');
+        try { require('child_process').execSync('open -a "MetaTrader 5"'); } catch (x) { sys('no se pudo abrir MT5: ' + x.message); }
+      }
     }
     if (ctx.QBOT && !ctx.QBOT.running && !ctx.QBOT.state.apagado) { sys('el bot no estaba corriendo: arrancando'); ctx.QBOT.start(); }
   }, 60000);

@@ -253,7 +253,9 @@
     }
   }
   async function step() {
-    const day = nyDate(); if (S.day !== day) { S.day = day; S.R = { SPX: 0, QQQ: 0 }; S.ops = { SPX: 0, QQQ: 0 }; await warmup(); await autoRatio(); }
+    const day = nyDate(); if (S.day !== day) { S.day = day; S.R = { SPX: 0, QQQ: 0 }; S.ops = { SPX: 0, QQQ: 0 }; await warmup(); S.ratioT = 0; S.ratioAviso = false; }
+    // El ratio MNQ/QQQ necesita el precio de QQQ, que Quantium solo da con el mercado abierto: se reintenta cada minuto hasta tenerlo
+    if (RUN && cfg.QQQ.activo && !cfg.QQQ.ratio && Date.now() - (S.ratioT || 0) > 60000) { S.ratioT = Date.now(); await autoRatio(); }
     const m = nyMin(); if (!weekday() || m < 570 || m > 961) { render(); return; }
     await Promise.all(['SPX', 'QQQ'].map(async (tk) => {
       if (!cfg[tk].activo) return;
@@ -347,7 +349,7 @@
     if (!RUN || !window.qbotNQ || !cfg.QQQ.activo) return;
     try { const nq = await window.qbotNQ(); const tr = await get('/trace', { ticker: 'QQQ', exps: '0dte' });
       if (nq > 0 && tr.spot > 0) { cfg.QQQ.ratio = nq / tr.spot; log(`ratio MNQ/QQQ automático = ${cfg.QQQ.ratio.toFixed(3)} (NQ ${nq.toFixed(2)} / QQQ ${tr.spot.toFixed(2)})`); }
-      else log('no se pudo calcular el ratio MNQ/QQQ: MNQ no opera hasta tenerlo'); } catch (e) { log('ratio MNQ/QQQ falló: ' + e.message); }
+      else if (!S.ratioAviso) { S.ratioAviso = true; log('ratio MNQ/QQQ todavía sin precio de QQQ (normal antes de las 9:30): se reintenta cada minuto'); } } catch (e) { log('ratio MNQ/QQQ falló: ' + e.message); }
   }
   if (!window.__QBOT_NO_UI) ui();
   if (RUN) setTimeout(() => { start(); }, 8000);
