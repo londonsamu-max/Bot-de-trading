@@ -261,18 +261,22 @@
       if (!cfg[tk].activo) return;
       try {
         const snap = await liveSnap(tk); S.err = null;
+        // Si el historial del día no se pudo cargar (p. ej. sin sesión al arrancar), se carga ahora antes de evaluar
+        if (S.warmFail && S.warmFail[tk] && !(S.eng[tk] && (S.eng[tk].state.pos || S.eng[tk].state.pend))) await warmTk(tk);
         const age = (Date.now() - snap.t.getTime()) / 1000; S.live[tk] = { spot: snap.spot, flip: snap.flip, age };
         if (age > 180) { log(`datos atrasados ${Math.round(age)} s: no se evalúa`, tk); return; }
         if (S.last[tk] && nyHM(S.last[tk]) === nyHM(snap.t)) return; // mismo minuto
         S.last[tk] = snap.t;
         await handle(tk, S.eng[tk].onMinute(snap));
         if (S.errTk && S.errTk[tk]) { log('datos de nuevo disponibles', tk); S.errTk[tk] = null; }
-      } catch (e) { S.err = e.message; S.errTk = S.errTk || {}; if (S.errTk[tk] !== e.message) { S.errTk[tk] = e.message; log('error de datos: ' + e.message + ' (no se evalúa hasta que vuelvan; no se repite este aviso)', tk); } }
+      } catch (e) { S.err = e.message; S.errTk = S.errTk || {}; if (!S.errTk[tk]) { S.errTk[tk] = e.message; log('error de datos: ' + e.message + ' (no se evalúa hasta que vuelvan; no se repite este aviso)', tk); } }
     }));
     render();
   }
-  async function warmup() {
-    for (const tk of ['SPX', 'QQQ']) {
+  async function warmup() { for (const tk of ['SPX', 'QQQ']) await warmTk(tk); }
+  async function warmTk(tk) {
+    S.warmFail = S.warmFail || {}; S.warmFail[tk] = false;
+    {
       S.eng[tk] = window.QOIEngine({ sc: TK[tk].sc, cfg: { mg: TK[tk].mg, skipRebMinus: TK[tk].skip } });
       try {
         const h = (await get('/historial', { ticker: tk, exps: '0dte', day: nyDate() })).map(histSnap).filter(Boolean);
@@ -281,7 +285,7 @@
         const st = S.eng[tk].state; if (st.pos || st.pend) { log(`al arrancar había una operación del modelo abierta o armada; se descarta (no está en tu cuenta)`, tk); st.pos = null; st.pend = null; }
         S.last[tk] = h.length ? h[h.length - 1].t : null;
         log(`historial cargado: ${byMin.size} minutos`, tk);
-      } catch (e) { log('no se pudo cargar el historial: ' + e.message, tk); }
+      } catch (e) { S.warmFail[tk] = true; log('no se pudo cargar el historial: ' + e.message + ' (se recarga cuando vuelvan los datos)', tk); }
     }
   }
   async function start() {
@@ -350,7 +354,7 @@
     if (!RUN || !window.qbotNQ || !cfg.QQQ.activo) return;
     try { const nq = await window.qbotNQ(); const tr = await get('/trace', { ticker: 'QQQ', exps: '0dte' });
       if (nq > 0 && tr.spot > 0) { cfg.QQQ.ratio = nq / tr.spot; log(`ratio MNQ/QQQ automático = ${cfg.QQQ.ratio.toFixed(3)} (NQ ${nq.toFixed(2)} / QQQ ${tr.spot.toFixed(2)})`); }
-      else if (!S.ratioAviso) { S.ratioAviso = true; log('ratio MNQ/QQQ todavía sin precio de QQQ (normal antes de las 9:30): se reintenta cada minuto'); } } catch (e) { log('ratio MNQ/QQQ falló: ' + e.message); }
+      else if (!S.ratioAviso) { S.ratioAviso = true; log('ratio MNQ/QQQ todavía sin precio de QQQ (normal antes de las 9:30): se reintenta cada minuto'); } } catch (e) { if (!S.ratioAviso) { S.ratioAviso = true; log('ratio MNQ/QQQ falló: ' + e.message + ' (se reintenta cada minuto)'); } }
   }
   if (!window.__QBOT_NO_UI) ui();
   if (RUN) setTimeout(() => { start(); }, 8000);

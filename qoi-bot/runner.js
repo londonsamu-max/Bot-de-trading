@@ -15,6 +15,7 @@ const AUTH_KEY = 'sb-euwdfoswzwsqrknnvjvj-auth-token';
 const API = 'https://api-spike.quantium.global';
 
 async function probar() {
+  if (readCfg().sesionDesdeChrome) sesion.usarChrome(true);
   const renovado = await sesion.asegurar();
   console.log(`token ${renovado ? 'renovado' : 'vigente'} · caduca en ${sesion.minutosRestantes()} min`);
   for (const [p, q] of [['/spot', { ticker: 'SPX' }], ['/trace', { ticker: 'QQQ', exps: '0dte' }]]) {
@@ -26,8 +27,14 @@ async function probar() {
 }
 
 async function correr() {
-  await sesion.asegurar();
   const c = readCfg();
+  if (c.sesionDesdeChrome) {
+    // La sesión la renueva solo tu Chrome y llega por el relevo local; el bot nunca la renueva (no chocan)
+    sesion.usarChrome(true);
+    require('./relevo').iniciar((msg, importante) => { sys(msg); if (importante) avisar('Quantium', msg); });
+    try { await sesion.asegurar(); sys(`sesión de Chrome vigente · caduca en ${sesion.minutosRestantes()} min`); }
+    catch (e) { sys('esperando la sesión de Chrome: ' + e.message); avisar('Quantium: falta la sesión', 'Abre Quantium en tu Chrome'); }
+  } else await sesion.asegurar();
   // Un error inesperado se registra y el bot sigue (no se cae a mitad de sesión)
   process.on('uncaughtException', (e) => sys('error inesperado (el bot sigue): ' + e.message));
   process.on('unhandledRejection', (e) => sys('error inesperado (el bot sigue): ' + (e && e.message)));
@@ -78,10 +85,16 @@ async function correr() {
     if (n.getHours() * 60 + n.getMinutes() >= end) return salir('fin de la sesión: cerrando');
     try {
       if (await sesion.asegurar()) sys(`token renovado · caduca en ${sesion.minutosRestantes()} min`);
+      if (fallos && c.sesionDesdeChrome) sys('sesión de Chrome de nuevo vigente');
       fallos = 0;
     } catch (e) {
-      fallos += 1; sys(`ERROR de sesión (${fallos}): ${e.message}`); if (fallos === 1) avisar('Quantium: sesión con problemas', e.message);
-      if (fallos >= 3) return salir('sin sesión válida: el bot se detiene (corre "node runner.js --probar" tras copiar un token nuevo)', 1);
+      fallos += 1;
+      if (c.sesionDesdeChrome) { // en modo Chrome no se apaga: espera a que Chrome mande un token nuevo
+        if (fallos === 1) { sys('sin sesión de Chrome: ' + e.message); avisar('Quantium: sin sesión', 'Abre Quantium en tu Chrome para que el bot siga'); }
+      } else {
+        sys(`ERROR de sesión (${fallos}): ${e.message}`); if (fallos === 1) avisar('Quantium: sesión con problemas', e.message);
+        if (fallos >= 3) return salir('sin sesión válida: el bot se detiene (corre "node runner.js --probar" tras copiar un token nuevo)', 1);
+      }
     }
     // Vigilancia de MT5: si el EA deja de responder, se reabre MetaTrader 5 (como mucho cada 3 minutos) y se avisa
     if (c.modo === 'demo' && (readCfg().cuentas || []).some((a) => a.activa && a.tipo === 'mt5')) {
