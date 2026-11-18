@@ -23,7 +23,7 @@ if (process.platform === 'darwin') {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>${label}</string>
-<key>ProgramArguments</key><array><string>${NODE}</string><string>${path.join(DIR, 'launcher.js')}</string></array>
+<key>ProgramArguments</key><array><string>${NODE}</string><string>${path.join(DIR, 'runner.js')}</string></array>
 <key>WorkingDirectory</key><string>${DIR}</string>
 <key>StartCalendarInterval</key><array>${days}</array>
 <key>StandardOutPath</key><string>${path.join(DIR, 'registros', 'consola.log')}</string>
@@ -36,9 +36,9 @@ if (process.platform === 'darwin') {
   const name = 'BotQOI';
   try { execSync(`schtasks /Delete /TN ${name} /F`, { stdio: 'ignore' }); } catch (e) {}
   if (quitar) { console.log('Horario quitado.'); process.exit(0); }
-  execSync(`schtasks /Create /TN ${name} /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 08:20 /TR "\\"${NODE}\\" \\"${path.join(DIR, 'launcher.js')}\\"" /F`);
+  execSync(`schtasks /Create /TN ${name} /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 08:20 /TR "\\"${NODE}\\" \\"${path.join(DIR, 'runner.js')}\\"" /F`);
   console.log('Listo: el bot arrancará de lunes a viernes a las 8:20. El computador debe estar encendido y con tu sesión abierta.');
 } else {
   console.log('Agrega esta línea a tu crontab (crontab -e):');
-  console.log(`20 8 * * 1-5 cd "${DIR}" && "${NODE}" launcher.js >> registros/consola.log 2>&1`);
+  console.log(`20 8 * * 1-5 cd "${DIR}" && "${NODE}" runner.js >> registros/consola.log 2>&1`);
 }

@@ -32,3 +32,12 @@ Requisitos
 - Contratos: MESZ2026 y MNQZ2026 vencen en diciembre; cámbialos en config.json al hacer el roll.
 
 Desinstalar el horario: node instalar-horario.js --quitar
+
+Modo sin navegador (runner.js) — es el que usa el horario
+- Corre el mismo bot.js dentro de Node, sin abrir Chrome, pidiendo los datos a la API de Quantium con un token.
+- Token: ~/.qoibot-token.json (la sesión copiada de localStorage) y ~/.qoibot-supabase-key. Se renueva solo.
+- Probar token y API:  node runner.js --probar
+- Si el registro dice "sin sesión válida": copia un token nuevo con
+  copy(localStorage.getItem('sb-euwdfoswzwsqrknnvjvj-auth-token')) en la consola de Quantium,
+  luego  pbpaste > ~/.qoibot-token.json  y  node runner.js --probar
+- La versión con Chrome sigue disponible:  npm start
