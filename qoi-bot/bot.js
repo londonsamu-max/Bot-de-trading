@@ -15,7 +15,7 @@
       mg: 2.34e9, open: true, opd: 1.5, cht: 0.1,
       corr: { min: 3, ruptura: [30, 15], rebote: [20, 10], noTighten: true, maxMin: 180, A: [25, 15] },
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
-      F: false, FSL: 8, FMG: 0, FTR: null, soloF: false,                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      F: false, FSL: 8, FMG: 0, FTR: null, soloF: false, sarTodo: false, // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -132,7 +132,7 @@
           let cruces = 0; for (let i = 1; i < past.length; i++) if (past[i] !== past[i - 1]) cruces++;
           const SL = (reg > 0 && cruces >= 2) ? 12 : 8;
           if (dc === 'DEX alto charm+') { st.pend = { n0: n, t0: s.t, d: -d, trig: k - d * P(SL), stop: k + d * P(8), cancel: null, wait: 120, regla: 'C', k, tipo, info, leg: 'ruptura (solo)' }; emit({ type: 'armed', t: s.t, pend: st.pend }); break; }
-          st.pos = openLeg(s, n, p, d, k - d * P(SL), 'rebote', 'C', k, tipo, info + ` · stop ${SL}`, 'rebote'); st.pos.sar = dc !== 'DEX- charm-';
+          st.pos = openLeg(s, n, p, d, k - d * P(SL), 'rebote', 'C', k, tipo, info + ` · stop ${SL}`, 'rebote'); st.pos.sar = C.sarTodo || dc !== 'DEX- charm-';
           emit({ type: 'entry', t: s.t, pos: st.pos }); break;
         }
       }
