@@ -266,7 +266,8 @@
         if (S.last[tk] && nyHM(S.last[tk]) === nyHM(snap.t)) return; // mismo minuto
         S.last[tk] = snap.t;
         await handle(tk, S.eng[tk].onMinute(snap));
-      } catch (e) { S.err = e.message; log('error de datos: ' + e.message, tk); }
+        if (S.errTk && S.errTk[tk]) { log('datos de nuevo disponibles', tk); S.errTk[tk] = null; }
+      } catch (e) { S.err = e.message; S.errTk = S.errTk || {}; if (S.errTk[tk] !== e.message) { S.errTk[tk] = e.message; log('error de datos: ' + e.message + ' (no se evalúa hasta que vuelvan; no se repite este aviso)', tk); } }
     }));
     render();
   }
