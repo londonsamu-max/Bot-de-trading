@@ -15,7 +15,7 @@
       mg: 2.34e9, open: true, opd: 1.5, cht: 0.1,
       corr: { min: 3, ruptura: [30, 15], rebote: [20, 10], noTighten: true, maxMin: 180, A: [25, 15] },
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
-      F: false, FSL: 8, FMG: 0,                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      F: false, FSL: 8, FMG: 0, FTR: null, soloF: false,                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -41,6 +41,7 @@
         dist: tr ? P(tr[1]) : null, act: tr ? P(tr[0]) : null, tg: tr ? ((run && C.corr.noTighten) ? null : sigVerde(s, e, d)) : null,
         tp: mode === 'A' ? P(20) : null, maxn: run ? C.corr.maxMin : 120, sar: false };
       if (run && mode === 'A' && C.corr.A) Object.assign(lg, { tp: null, dist: P(C.corr.A[1]), act: P(C.corr.A[0]), tg: null });
+      if (regla === 'F' && C.FTR) { const R0 = Math.abs(e - stop); Object.assign(lg, { act: C.FTR[0] * R0, dist: C.FTR[1] * R0, tg: null, maxn: 120 }); } // F: trailing desde +1R a 1R
       return lg;
     }
     function emit(ev) { st.events.push(ev); return ev; }
@@ -111,6 +112,8 @@
         const chm = median(near.map(x => Math.abs(x.ch)));
         const dc = (drel >= 1.55 && sk.ch > C.cht * chm) ? 'DEX alto charm+' : (sk.dx < 0 && sk.ch < 0) ? 'DEX- charm-' : 'otro';
         const info = `${oc >= op ? 'calls' : 'puts'} ${(oc >= op ? scs : sps) > 0 ? 'vendidos' : 'comprados'} · GEX ${(g / 1e6).toFixed(0)}M · ${dc} · régimen ${reg > 0 ? '+' : '−'}`;
+        // Motor solo-F: únicamente la regla F, en su propio espacio (no compite con las demás reglas)
+        if (C.soloF) { if (g < 0 && side < 0 && op > oc) { st.pos = openLeg(s, n, p, -1, k + P(C.FSL), 'rebote', 'F', k, tipo, info, 'venta rechazo F'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; } continue; }
         // Regla A
         if (g < 0 && side > 0 && scs < 0 && oc > op) { st.pos = openLeg(s, n, p, 1, k - P(20), 'A', 'A', k, tipo, info, 'compra A'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; }
         // Regla D
@@ -228,49 +231,50 @@
   const wait = (ms) => new Promise(r => setTimeout(r, ms));
   function futPts(tk, idxPts) { return tk === 'SPX' ? idxPts : (cfg.QQQ.ratio ? idxPts * cfg.QQQ.ratio : null); }
   const tick4 = (x) => Math.round(x * 4) / 4;
-  async function sendEntry(tk, pos) {
+  async function sendEntry(tk, pos, g) {
     // El stop en el bróker se pone en el MISMO nivel absoluto que el del motor, medido desde el precio real de envío
     // (en órdenes armadas el motor anota la entrada en el disparo, pero el envío sale al precio del minuto).
     const c = cfg[tk]; const eNow = (S.px && isFinite(S.px[tk])) ? S.px[tk] : pos.e; pos.eFill = eNow;
     const stopIdx = Math.abs(eNow - pos.st0); const stopF = futPts(tk, stopIdx);
-    if ((eNow - pos.st0) * pos.d <= 0) { log('el precio ya está en el stop del modelo: no se envía', tk); return false; }
-    if (stopF == null) { log('sin ratio MNQ/QQQ: no se envía', tk); return false; }
+    if ((eNow - pos.st0) * pos.d <= 0) { log('el precio ya está en el stop del modelo: no se envía', g ? tk + '·' + g : tk); return false; }
+    if (stopF == null) { log('sin ratio MNQ/QQQ: no se envía', g ? tk + '·' + g : tk); return false; }
     const qty = Math.min(c.maxQty, Math.floor(cfg.riesgoUSD / (stopF * c.pv)));
-    if (qty < 1) { log(`stop de ${stopF.toFixed(2)} pts es muy amplio para $${cfg.riesgoUSD}: no se envía`, tk); return false; }
-    const body = { ticker: c.ticker, action: pos.d > 0 ? 'buy' : 'sell', quantity: qty, stopLoss: { type: 'stop', amount: tick4(stopF) } };
+    if (qty < 1) { log(`stop de ${stopF.toFixed(2)} pts es muy amplio para $${cfg.riesgoUSD}: no se envía`, g ? tk + '·' + g : tk); return false; }
+    const body = { ticker: c.ticker, action: pos.d > 0 ? 'buy' : 'sell', quantity: qty, stopLoss: { type: 'stop', amount: tick4(stopF) } }; if (g) body.grupo = g;
     if (pos.tp) { const tpLeft = pos.tp - (eNow - pos.e) * pos.d; if (tpLeft > 0) body.takeProfit = { amount: tick4(futPts(tk, tpLeft)) }; }
     let r = await post(body);
-    if (!r.ok && !r.papel) { log('la entrada falló: reintentando en 1 s', tk, 'FALLÓ ' + r.status); await wait(1000); r = await post(body); }
+    if (!r.ok && !r.papel) { log('la entrada falló: reintentando en 1 s', g ? tk + '·' + g : tk, 'FALLÓ ' + r.status); await wait(1000); r = await post(body); }
     pos.qty = qty; pos.sent = true;
-    log(`${r.papel ? '[papel] ' : ''}${body.action.toUpperCase()} ${qty} ${c.ticker} · stop ${body.stopLoss.amount} pts${body.takeProfit ? ' · objetivo ' + body.takeProfit.amount : ''} · ${pos.regla} ${pos.leg}${pos.run ? ' · corredor' : ''} · nivel ${pos.k}`, tk, r.papel ? '' : (r.ok ? 'OK ' + r.status : 'FALLÓ ' + r.status));
+    log(`${r.papel ? '[papel] ' : ''}${body.action.toUpperCase()} ${qty} ${c.ticker} · stop ${body.stopLoss.amount} pts${body.takeProfit ? ' · objetivo ' + body.takeProfit.amount : ''} · ${pos.regla} ${pos.leg}${pos.run ? ' · corredor' : ''} · nivel ${pos.k}`, g ? tk + '·' + g : tk, r.papel ? '' : (r.ok ? 'OK ' + r.status : 'FALLÓ ' + r.status));
     return true;
   }
-  async function sendTrail(tk, pos) {
+  async function sendTrail(tk, pos, g) {
     const rel = futPts(tk, pos.st - (isFinite(pos.eFill) ? pos.eFill : pos.e)); if (rel == null) return; // stop relativo a la entrada, en puntos del futuro/CFD
-    const r = await post({ ticker: cfg[tk].ticker, action: 'mover_stop', stopRel: tick4(rel) });
-    if (!r.papel) log(`stop movido a ${pos.st.toFixed(2)} (${rel >= 0 ? '+' : ''}${tick4(rel)} pts desde la entrada)`, tk, r.ok ? 'OK ' + (r.status || '') : 'FALLÓ ' + r.status);
+    const r = await post(Object.assign({ ticker: cfg[tk].ticker, action: 'mover_stop', stopRel: tick4(rel) }, g ? { grupo: g } : {}));
+    if (!r.papel) log(`stop movido a ${pos.st.toFixed(2)} (${rel >= 0 ? '+' : ''}${tick4(rel)} pts desde la entrada)`, g ? tk + '·' + g : tk, r.ok ? 'OK ' + (r.status || '') : 'FALLÓ ' + r.status);
   }
-  async function sendExit(tk, why) {
-    const c = cfg[tk]; const r1 = await post({ ticker: c.ticker, action: 'exit' }); await wait(1200); const r2 = await post({ ticker: c.ticker, action: 'cancel' });
-    log(`${r1.papel ? '[papel] ' : ''}CIERRE ${c.ticker} (${why})`, tk, r1.papel ? '' : `exit ${r1.ok ? 'OK' : 'FALLÓ ' + r1.status} · cancel ${r2.ok ? 'OK' : 'FALLÓ ' + r2.status}`);
+  async function sendExit(tk, why, g) {
+    const c = cfg[tk]; const G = g ? { grupo: g } : {}; const r1 = await post(Object.assign({ ticker: c.ticker, action: 'exit' }, G)); await wait(1200); const r2 = await post(Object.assign({ ticker: c.ticker, action: 'cancel' }, G));
+    log(`${r1.papel ? '[papel] ' : ''}CIERRE ${c.ticker} (${why})`, g ? tk + '·' + g : tk, r1.papel ? '' : `exit ${r1.ok ? 'OK' : 'FALLÓ ' + r1.status} · cancel ${r2.ok ? 'OK' : 'FALLÓ ' + r2.status}`);
   }
 
   // ---------- ciclo ----------
-  async function handle(tk, evs) {
+  async function handle(tk0, evs, g) {
+    const tk = tk0; const L = g ? tk0 + '·' + g : tk0; const okey = tk0 + (g || '');
     for (const ev of evs) {
-      if (ev.type === 'armed') log(`armada ${ev.pend.regla} ${ev.pend.leg} en ${ev.pend.k} · dispara en ${ev.pend.trig.toFixed(2)}`, tk);
-      else if (ev.type === 'cancel') log(`cancelada ${ev.pend.regla} en ${ev.pend.k}${ev.why ? ' (' + ev.why + ')' : ''}`, tk);
-      else if (ev.type === 'tighten') log(`trailing apretado a 3 pts (siguiente strike verde)`, tk);
-      else if (ev.type === 'trail') { if (ev.pos.sent) await sendTrail(tk, ev.pos); }
+      if (ev.type === 'armed') log(`armada ${ev.pend.regla} ${ev.pend.leg} en ${ev.pend.k} · dispara en ${ev.pend.trig.toFixed(2)}`, L);
+      else if (ev.type === 'cancel') log(`cancelada ${ev.pend.regla} en ${ev.pend.k}${ev.why ? ' (' + ev.why + ')' : ''}`, L);
+      else if (ev.type === 'tighten') log(`trailing apretado a 3 pts (siguiente strike verde)`, L);
+      else if (ev.type === 'trail') { if (ev.pos.sent) await sendTrail(tk, ev.pos, g); }
       else if (ev.type === 'exit') {
         const R = ev.pts / Math.abs(ev.pos.e - ev.pos.st0); if (ev.pos.sent) S.R[tk] += R; // solo cuentan las operaciones enviadas
-        if (ev.pos.sent) await sendExit(tk, ev.why);
-        log(`salida ${ev.why} · ${ev.pts >= 0 ? '+' : ''}${ev.pts.toFixed(2)} pts del índice (${R >= 0 ? '+' : ''}${R.toFixed(2)} R) · día ${S.R[tk].toFixed(2)} R`, tk);
+        if (ev.pos.sent) await sendExit(tk, ev.why, g);
+        log(`salida ${ev.why} · ${ev.pts >= 0 ? '+' : ''}${ev.pts.toFixed(2)} pts del índice (${R >= 0 ? '+' : ''}${R.toFixed(2)} R) · día ${S.R[tk].toFixed(2)} R`, L);
       } else if (ev.type === 'entry') {
-        const bloqueo = S.apagado ? 'bot apagado' : !cfg[tk].activo ? 'instrumento desactivado' : S.R.SPX + S.R.QQQ <= -cfg.maxPerdidaR ? 'límite de pérdida del día' : S.ops[tk] >= cfg.maxOps ? 'máximo de operaciones del día' : null;
-        if (bloqueo) { log(`entrada ${ev.pos.regla} ignorada: ${bloqueo}`, tk); ev.pos.sent = false; continue; }
-        S.ops[tk]++; if (ev.pos.leg === 'ruptura' && ev.pos.regla === 'C') await wait(2500); // deja terminar el cierre del rebote
-        await sendEntry(tk, ev.pos);
+        const bloqueo = S.apagado ? 'bot apagado' : !cfg[tk].activo ? 'instrumento desactivado' : S.R.SPX + S.R.QQQ <= -cfg.maxPerdidaR ? 'límite de pérdida del día' : (S.ops[okey] || 0) >= cfg.maxOps ? 'máximo de operaciones del día' : null;
+        if (bloqueo) { log(`entrada ${ev.pos.regla} ignorada: ${bloqueo}`, L); ev.pos.sent = false; continue; }
+        S.ops[okey] = (S.ops[okey] || 0) + 1; if (ev.pos.leg === 'ruptura' && ev.pos.regla === 'C') await wait(2500); // deja terminar el cierre del rebote
+        await sendEntry(tk, ev.pos, g);
       }
     }
   }
@@ -284,43 +288,57 @@
       try {
         const snap = await liveSnap(tk); S.err = null;
         // Si el historial del día no se pudo cargar (p. ej. sin sesión al arrancar), se carga ahora antes de evaluar
-        if (S.warmFail && S.warmFail[tk] && !(S.eng[tk] && (S.eng[tk].state.pos || S.eng[tk].state.pend))) await warmTk(tk);
+        if (S.warmFail && S.warmFail[tk] && !(S.eng[tk] && (S.eng[tk].state.pos || S.eng[tk].state.pend)) && !(S.engF && S.engF[tk] && S.engF[tk].state.pos)) await warmTk(tk);
         const age = (Date.now() - snap.t.getTime()) / 1000; S.live[tk] = { spot: snap.spot, flip: snap.flip, age };
         if (age > 180) { log(`datos atrasados ${Math.round(age)} s: no se evalúa`, tk); return; }
         if (S.last[tk] && nyHM(S.last[tk]) === nyHM(snap.t)) return; // mismo minuto
         S.last[tk] = snap.t;
         S.px = S.px || {}; S.px[tk] = snap.spot;
         await handle(tk, S.eng[tk].onMinute(snap));
+        if (S.engF && S.engF[tk]) await handle(tk, S.engF[tk].onMinute(snap), 'F');
         if (S.errTk && S.errTk[tk]) { log('datos de nuevo disponibles', tk); S.errTk[tk] = null; }
       } catch (e) { S.err = e.message; S.errTk = S.errTk || {}; if (!S.errTk[tk]) { S.errTk[tk] = e.message; log('error de datos: ' + e.message + ' (no se evalúa hasta que vuelvan; no se repite este aviso)', tk); } }
     }));
     render();
   }
+  // Motor principal (reglas A, C, D, E) y, si config.json lo pide ("motor": {"F": true, "separado": true}), un motor aparte
+  // solo para la regla F: tiene su propio espacio (no le quita operaciones al principal) y sus propias posiciones en el bróker.
+  function motorCfg(tk, soloF) {
+    const m = cfg.motor || {}; const base = { mg: TK[tk].mg, skipRebMinus: TK[tk].skip };
+    if (soloF) return Object.assign(base, m, { F: true, soloF: true });
+    return Object.assign(base, m, m.separado ? { F: false } : {});
+  }
+  const conF = () => !!(cfg.motor && cfg.motor.F && cfg.motor.separado);
   async function warmup() { for (const tk of ['SPX', 'QQQ']) await warmTk(tk); }
   async function warmTk(tk) {
     S.warmFail = S.warmFail || {}; S.warmFail[tk] = false;
     {
-      S.eng[tk] = window.QOIEngine({ sc: TK[tk].sc, cfg: { mg: TK[tk].mg, skipRebMinus: TK[tk].skip } });
+      S.eng[tk] = window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, false) });
+      S.engF = S.engF || {}; S.engF[tk] = conF() ? window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, true) }) : null;
       try {
         const h = (await get('/historial', { ticker: tk, exps: '0dte', day: nyDate() })).map(histSnap).filter(Boolean);
         const byMin = new Map(); for (const s of h) byMin.set(nyHM(s.t), s);
-        for (const s of byMin.values()) S.eng[tk].onMinute(s);
+        for (const s of byMin.values()) { S.eng[tk].onMinute(s); if (S.engF[tk]) S.engF[tk].onMinute(s); }
         // Una operación del modelo ya abierta se conserva como fantasma (no se envía: entrar tarde sería perseguir el precio)
         // para que el motor siga idéntico al backtest; una orden armada sigue viva y se envía si se dispara.
-        const st = S.eng[tk].state;
+        for (const [eng, g] of [[S.eng[tk], ''], [S.engF[tk], 'F']]) {
+          if (!eng) continue; const st = eng.state; const L = g ? tk + '·' + g : tk;
         if (st.pos) {
           st.pos.sent = false; const pos = st.pos; const p = h.length ? h[h.length - 1].spot : NaN; const R0 = Math.abs(pos.e - pos.st0);
           const desv = (p - pos.e) * pos.d; // + a favor, - en contra, en puntos del índice
           const txt = `al cargar el historial el modelo ya estaba en ${pos.d > 0 ? 'COMPRA' : 'VENTA'} ${pos.regla} en ${pos.k} (entrada ${pos.e.toFixed(2)}, stop ${pos.st.toFixed(2)}, precio ${isFinite(p) ? p.toFixed(2) : '?'})`;
           // Se ejecuta tarde solo si el precio sigue a menos de medio R de la entrada original y lejos del stop: así no se persigue el precio
-          if (RUN && isFinite(p) && Math.abs(desv) <= 0.5 * R0 && (p - pos.st) * pos.d >= 0.5 * R0 && !S.apagado && cfg[tk].activo) {
-            log(txt + ': todavía cerca de la entrada, se envía ahora', tk);
+          const yaEnviada = window.qbotTieneTickets ? await window.qbotTieneTickets(cfg[tk].ticker, g) : false;
+          if (yaEnviada) { pos.sent = true; log(txt + ': ya se había enviado antes del reinicio, se sigue gestionando', L); }
+          else if (RUN && isFinite(p) && Math.abs(desv) <= 0.5 * R0 && (p - pos.st) * pos.d >= 0.5 * R0 && !S.apagado && cfg[tk].activo) {
+            log(txt + ': todavía cerca de la entrada, se envía ahora', L);
             const tarde = Object.assign({}, pos, { e: p, st0: pos.st, tp: pos.tp ? Math.max(0, pos.tp - desv) : null });
             S.px = S.px || {}; S.px[tk] = p;
-            if (await sendEntry(tk, tarde)) { pos.sent = true; pos.qty = tarde.qty; pos.eFill = tarde.eFill; S.ops[tk]++; }
-          } else log(txt + ': ya se alejó de la entrada, se sigue sin enviarla (no se persigue el precio)', tk);
+            if (await sendEntry(tk, tarde, g)) { pos.sent = true; pos.qty = tarde.qty; pos.eFill = tarde.eFill; const ok = tk + g; S.ops[ok] = (S.ops[ok] || 0) + 1; }
+          } else log(txt + ': ya se alejó de la entrada, se sigue sin enviarla (no se persigue el precio)', L);
         }
-        if (st.pend) log(`al cargar el historial había una orden armada ${st.pend.regla} en ${st.pend.k} (dispara en ${st.pend.trig.toFixed(2)}): sigue activa`, tk);
+        if (st.pend) log(`al cargar el historial había una orden armada ${st.pend.regla} en ${st.pend.k} (dispara en ${st.pend.trig.toFixed(2)}): sigue activa`, L);
+        }
         S.last[tk] = h.length ? h[h.length - 1].t : null;
         log(`historial cargado: ${byMin.size} minutos`, tk);
       } catch (e) { S.warmFail[tk] = true; log('no se pudo cargar el historial: ' + e.message + ' (se recarga cuando vuelvan los datos)', tk); }
@@ -334,7 +352,7 @@
   function pause() { clearInterval(S.timer); S.running = false; log('pausado (no cierra posiciones)'); }
   async function kill() {
     S.apagado = true; clearInterval(S.timer); S.running = false;
-    for (const tk of ['SPX', 'QQQ']) { const e = S.eng[tk]; if (e) { e.state.pos = null; e.state.pend = null; } await sendExit(tk, 'apagado manual'); }
+    for (const tk of ['SPX', 'QQQ']) { for (const [e, g] of [[S.eng[tk], ''], [S.engF && S.engF[tk], 'F']]) { if (e) { e.state.pos = null; e.state.pend = null; } if (e || !g) await sendExit(tk, 'apagado manual', g); } }
     log('APAGADO: se mandó cierre y cancelación en los dos instrumentos');
   }
   function askRatio() {
@@ -387,7 +405,7 @@
       else if (k === 'APAGAR TODO' && confirm('¿Cerrar posiciones, cancelar órdenes y apagar el bot?')) kill(); render(); });
     document.body.appendChild(box); render();
   }
-  window.QBOT = { start, pause, kill, cfg: () => cfg, state: S, get running() { return S.running; }, _test: { handle, histSnap, post, setCfg: (c) => { cfg = Object.assign(cfg, c); }, newEngines: () => { for (const tk of ['SPX', 'QQQ']) S.eng[tk] = window.QOIEngine({ sc: TK[tk].sc, cfg: { mg: TK[tk].mg, skipRebMinus: TK[tk].skip } }); } } };
+  window.QBOT = { start, pause, kill, cfg: () => cfg, state: S, get running() { return S.running; }, _test: { handle, histSnap, post, setCfg: (c) => { cfg = Object.assign(cfg, c); }, newEngines: () => { S.engF = S.engF || {}; for (const tk of ['SPX', 'QQQ']) { S.eng[tk] = window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, false) }); S.engF[tk] = conF() ? window.QOIEngine({ sc: TK[tk].sc, cfg: motorCfg(tk, true) }) : null; } } } };
   async function autoRatio() {
     if (!RUN || !window.qbotNQ || !cfg.QQQ.activo) return;
     try { const nq = await window.qbotNQ(); const tr = await get('/trace', { ticker: 'QQQ', exps: '0dte' });

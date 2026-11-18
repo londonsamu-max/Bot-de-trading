@@ -21,7 +21,7 @@ const { readCfg, nyNow, hhmm, sys, writeLog, postSignal, getNQ } = require('./co
   const c = readCfg();
   const ctx = await chromium.launchPersistentContext(PROFILE, { headless: !login && c.verVentana === false, viewport: null, args: ['--start-maximized'] });
   const botSrc = fs.readFileSync(path.join(DIR, 'bot.js'), 'utf8');
-  const pageCfg = { modo: c.modo, pollMs: c.pollMs, webhook: (c.cuentas || []).some((a) => a.activa && a.webhook) ? '(en el programa)' : '', riesgoUSD: c.riesgoUSD, maxPerdidaR: c.maxPerdidaR, maxOps: c.maxOps,
+  const pageCfg = { modo: c.modo, pollMs: c.pollMs, motor: c.motor, webhook: (c.cuentas || []).some((a) => a.activa && a.webhook) ? '(en el programa)' : '', riesgoUSD: c.riesgoUSD, maxPerdidaR: c.maxPerdidaR, maxOps: c.maxOps,
     SPX: Object.assign({ pv: 5 }, c.SPX), QQQ: Object.assign({ pv: 2, ratio: c.ratioMNQ || null }, c.QQQ) };
 
   await ctx.exposeBinding('qbotPost', async (_src, body) => {

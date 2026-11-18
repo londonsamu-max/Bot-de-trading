@@ -49,7 +49,7 @@ async function correr() {
       const e2 = mt5.estado(); if (e2.ok) sys(`MT5 listo: cuenta ${e2.s.account} (${e2.s.mode})`); else { sys('ATENCIÓN: MT5 sigue sin responder; revisa que el EA esté en un gráfico y Algo Trading activo'); avisar('MT5 no responde', 'Revisa el EA y Algo Trading'); }
     }
   }
-  const pageCfg = { modo: c.modo, pollMs: c.pollMs, webhook: (c.cuentas || []).some((a) => a.activa && a.webhook) ? '(en el programa)' : '', riesgoUSD: c.riesgoUSD, maxPerdidaR: c.maxPerdidaR, maxOps: c.maxOps,
+  const pageCfg = { modo: c.modo, pollMs: c.pollMs, motor: c.motor, webhook: (c.cuentas || []).some((a) => a.activa && a.webhook) ? '(en el programa)' : '', riesgoUSD: c.riesgoUSD, maxPerdidaR: c.maxPerdidaR, maxOps: c.maxOps,
     SPX: Object.assign({ pv: 5 }, c.SPX), QQQ: Object.assign({ pv: 2, ratio: c.ratioMNQ || null }, c.QQQ) };
 
   // Lo mínimo del navegador que usa bot.js
@@ -70,6 +70,7 @@ async function correr() {
     qbotPost: async (body) => { try { return await postSignal(body); } catch (e) { return { ok: false, status: e.message }; } },
     qbotLog: async (row) => { writeLog(row); console.log(`[${row.hora} NY] ${row.tk} ${row.msg} ${row.extra || ''}`); if (/OK|FALLÓ/.test(row.extra || '') || /APAGADO|límite de pérdida/.test(row.msg)) avisar(`${row.tk} ${row.msg}`.slice(0, 120), row.extra); },
     qbotNQ: async () => (c.ratioMNQ ? null : await getNQ()),
+    qbotTieneTickets: async (ticker, g) => { try { return mt5.tieneTickets(ticker, g); } catch (e) { return false; } },
   };
   ctx.window = ctx; ctx.globalThis = ctx;
   vm.createContext(ctx);

@@ -16,7 +16,7 @@ const FILES = process.env.QBOT_MT5_FILES || path.join(os.homedir(),
 const ORDER = path.join(FILES, 'sg_order.json');
 const RESULT = path.join(FILES, 'sg_result.json');
 const STATUS = path.join(FILES, 'sg_status.json');
-const TICKETS = path.join(__dirname, 'registros', 'mt5_tickets.json');
+const TICKETS = process.env.QBOT_TICKETS || path.join(__dirname, 'registros', 'mt5_tickets.json'); // las pruebas usan otro archivo
 
 const MAPA = { MES: 'US500', ES: 'US500', MNQ: 'NAS100', NQ: 'NAS100' };
 const raiz = (t) => (String(t).match(/^(MES|MNQ|ES|NQ)/) || [])[1];
@@ -66,6 +66,8 @@ function guardarTickets(t) { fs.mkdirSync(path.dirname(TICKETS), { recursive: tr
 async function senal(body, cuenta) {
   const r = raiz(body.ticker); const cfd = MAPA[r];
   if (!cfd) return `${cuenta.nombre}: ticker ${body.ticker} sin equivalente en MT5`;
+  // Cada motor (principal / F) guarda sus propios tickets: la salida de uno no cierra las posiciones del otro
+  const clave = cfd + (body.grupo ? '#' + body.grupo : ''); const nombreG = body.grupo ? `${cfd} (motor ${body.grupo})` : cfd;
   const e = estado(); if (!e.ok) return `${cuenta.nombre}: FALLÓ ${e.error}`;
   if (!cuentaSegura(e.s, cuenta)) return `${cuenta.nombre}: FALLÓ la cuenta de MT5 (${e.s.server}) no es demo; no se opera`;
 
@@ -81,14 +83,14 @@ async function senal(body, cuenta) {
     const tp = body.takeProfit ? (largo ? entrada + body.takeProfit.amount : entrada - body.takeProfit.amount) : 0;
     const res = await enviar({ action: 'place_order', cfd, direction: largo ? 'LONG' : 'SHORT', volume: lotes, sl, tp1: tp, tp2: 0, tp3: 0 });
     if (!res.success) return `${cuenta.nombre}: FALLÓ ${res.error || res.retcode}`;
-    const t = leerTickets(); (t[cfd] = t[cfd] || []).push({ t: res.ticket, px: Number(res.price) || entrada, d: largo ? 1 : -1 }); guardarTickets(t);
+    const t = leerTickets(); (t[clave] = t[clave] || []).push({ t: res.ticket, px: Number(res.price) || entrada, d: largo ? 1 : -1 }); guardarTickets(t);
     const real = res.volume != null ? Number(res.volume) : lotes; // el EA puede recortar al máximo de lote que tenga configurado
     return `${cuenta.nombre}: OK ${largo ? 'compra' : 'venta'} ${real} lotes ${cfd}${real < lotes ? ` (pedidos ${lotes}: el EA los recortó)` : ''} @ ${res.price} · stop ${sl.toFixed(1)} · ticket ${res.ticket} · ${res.ms} ms`;
   }
   if (body.action === 'exit') {
     // Se intenta cerrar cada ticket del bot sin mirar el estado (el EA lo actualiza cada pocos segundos y
     // una posición recién abierta podría no aparecer aún). "Posicion no encontrada" = ya la cerró el stop u objetivo.
-    const t = leerTickets(); const mios = t[cfd] || [];
+    const t = leerTickets(); const mios = t[clave] || [];
     const out = []; const quedan = [];
     for (const it of mios) {
       const k = typeof it === 'object' ? it.t : it;
@@ -97,13 +99,13 @@ async function senal(body, cuenta) {
       else if (/no encontrada/i.test(res.error || '')) out.push(`${k} ya estaba cerrada`);
       else { out.push(`${k} FALLÓ ${res.error || res.retcode}`); quedan.push(it); }
     }
-    t[cfd] = quedan; guardarTickets(t);
-    return `${cuenta.nombre}: ${out.length ? out.join(', ') : `sin posiciones del bot en ${cfd}`}`;
+    t[clave] = quedan; guardarTickets(t);
+    return `${cuenta.nombre}: ${out.length ? out.join(', ') : `sin posiciones del bot en ${nombreG}`}`;
   }
   if (body.action === 'mover_stop') {
     // El motor subió (o bajó) su stop: se lleva al mismo lugar en MT5, relativo al precio de entrada de cada posición del bot
-    const t = leerTickets(); const mios = (t[cfd] || []).filter((it) => typeof it === 'object' && isFinite(it.px));
-    if (!mios.length) return `${cuenta.nombre}: sin posiciones del bot en ${cfd} para mover el stop`;
+    const t = leerTickets(); const mios = (t[clave] || []).filter((it) => typeof it === 'object' && isFinite(it.px));
+    if (!mios.length) return `${cuenta.nombre}: sin posiciones del bot en ${nombreG} para mover el stop`;
     const out = [];
     for (const it of mios) {
       const sl = it.px + Number(body.stopRel);
@@ -115,4 +117,8 @@ async function senal(body, cuenta) {
   return `${cuenta.nombre}: ${body.action} no aplica en MT5 (órdenes a mercado)`;
 }
 
-module.exports = { senal, estado, cuentaSegura, FILES };
+// ¿El bot tiene registrada alguna posición de este instrumento y motor? (aunque MT5 ya la haya cerrado por stop/objetivo,
+// sigue registrada hasta que el motor da su salida: sirve para no volver a entrar en una operación que ya se hizo)
+function tieneTickets(ticker, grupo) { const cfd = MAPA[raiz(ticker)]; if (!cfd) return false; const l = leerTickets()[cfd + (grupo ? '#' + grupo : '')]; return !!(l && l.length); }
+
+module.exports = { senal, estado, cuentaSegura, tieneTickets, FILES };

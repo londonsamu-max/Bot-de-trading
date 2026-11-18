@@ -38,6 +38,7 @@ async function postSignal(body) {
       continue;
     }
     if (body.action === 'mover_stop') continue; // TradersPost no tiene esta acción: el stop se maneja con la salida
+    if (body.grupo) continue; // el motor F aparte solo opera en MT5 (en TradersPost compartiría la misma estrategia)
     const b = JSON.parse(JSON.stringify(body)); const r = root(b.ticker);
     if ((b.action === 'buy' || b.action === 'sell') && b.stopLoss && r) {
       const q = Math.floor(a.riesgoUSD / (b.stopLoss.amount * PV[r])); const max = (a.maxQty || {})[r] ?? 10;

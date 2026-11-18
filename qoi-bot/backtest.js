@@ -53,15 +53,20 @@ const nyHM = (t) => new Date(t.toLocaleString('en-US', { timeZone: 'America/New_
       let raw; try { raw = await dia(tk, d); } catch (e) { process.stderr.write(`  ${d} sin datos (${e.message})\n`); continue; }
       const snaps = raw.map(bot.QBOT._test.histSnap).filter(Boolean);
       const porMin = new Map(); for (const s of snaps) porMin.set(nyHM(s.t), s);
-      const eng = bot.QOIEngine({ sc: TK[tk].sc, cfg: Object.assign({ mg: TK[tk].mg, skipRebMinus: TK[tk].skip }, process.env.QBOT_PROX ? { prox: Number(process.env.QBOT_PROX) } : {}, process.env.QBOT_F ? { F: true, FSL: Number(process.env.QBOT_F) } : {}, process.env.QBOT_MG ? { mg: TK[tk].mg * Number(process.env.QBOT_MG) } : {}) });
-      let n = 0, Rdia = 0, abierta = null;
+      // Igual que el bot en vivo: motor principal y, si config.json lo pide (motor.F + motor.separado), un motor aparte solo-F
+      const extra = Object.assign({}, process.env.QBOT_PROX ? { prox: Number(process.env.QBOT_PROX) } : {}, process.env.QBOT_F ? { F: true, FSL: Number(process.env.QBOT_F) } : {}, process.env.QBOT_MG ? { mg: TK[tk].mg * Number(process.env.QBOT_MG) } : {});
+      const m = process.env.QBOT_SIN_MOTOR ? {} : (cfg.motor || {});
+      const base = { mg: TK[tk].mg, skipRebMinus: TK[tk].skip };
+      const motores = [{ g: '', eng: bot.QOIEngine({ sc: TK[tk].sc, cfg: Object.assign({}, base, m, m.separado ? { F: false } : {}, process.env.QBOT_SOLOF ? { F: true, soloF: true, FSL: 8, FMG: 0.15, FTR: [1, 1] } : {}, extra) }) }];
+      if (m.F && m.separado && !process.env.QBOT_SOLOF) motores.push({ g: 'F', eng: bot.QOIEngine({ sc: TK[tk].sc, cfg: Object.assign({}, base, m, { F: true, soloF: true }, extra) }) });
+      let Rdia = 0; for (const mo of motores) { mo.n = 0; mo.abierta = null; }
       for (const s of porMin.values()) {
-        for (const ev of eng.onMinute(s)) {
+        for (const mo of motores) for (const ev of mo.eng.onMinute(s)) {
           if (ev.type === 'entry') {
-            const bloqueada = n >= cfg.maxOps || Rdia <= -cfg.maxPerdidaR;
-            abierta = bloqueada ? null : ev.pos; if (!bloqueada) n++;
-          } else if (ev.type === 'exit' && abierta === ev.pos) {
-            const riesgo = Math.abs(ev.pos.e - ev.pos.st0); const R = ev.pts / riesgo; Rdia += R; abierta = null;
+            const bloqueada = mo.n >= cfg.maxOps || Rdia <= -cfg.maxPerdidaR;
+            mo.abierta = bloqueada ? null : ev.pos; if (!bloqueada) mo.n++;
+          } else if (ev.type === 'exit' && mo.abierta === ev.pos) {
+            const riesgo = Math.abs(ev.pos.e - ev.pos.st0); const R = ev.pts / riesgo; Rdia += R; mo.abierta = null;
             ops.push({ tk, d, hora: nyHM(ev.pos.t || ev.t), regla: `${ev.pos.regla} ${ev.pos.leg || ''}`.trim(), lado: ev.pos.d > 0 ? 'compra' : 'venta', R, pts: ev.pts, why: ev.why });
           }
         }

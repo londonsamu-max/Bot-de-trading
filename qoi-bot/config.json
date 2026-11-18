@@ -54,5 +54,15 @@
     }
   ],
   "pollMs": 2000,
-  "sesionDesdeChrome": true
+  "sesionDesdeChrome": true,
+  "motor": {
+    "F": true,
+    "separado": true,
+    "FSL": 8,
+    "FMG": 0.15,
+    "FTR": [
+      1,
+      1
+    ]
+  }
 }
