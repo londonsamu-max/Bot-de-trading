@@ -77,8 +77,9 @@ async function senal(body, cuenta) {
     const largo = body.action === 'buy'; const entrada = largo ? px.ask : px.bid; const stopPts = body.stopLoss.amount;
     const usdPt = (cuenta.usdPorPuntoLote || {})[cfd] ?? 1;
     const maxL = (cuenta.maxLotes || {})[cfd] ?? 1;
-    const lotes = Math.min(maxL, Math.floor((cuenta.riesgoUSD / (stopPts * usdPt)) * 100) / 100);
-    if (lotes < 0.1) return `${cuenta.nombre}: stop de ${stopPts} pts muy amplio para $${cuenta.riesgoUSD}, no se envía`;
+    const riesgo = cuenta.riesgoUSD * (Number(body.riesgoFactor) || 1); // menor en operaciones contra el régimen
+    const lotes = Math.min(maxL, Math.floor((riesgo / (stopPts * usdPt)) * 100) / 100);
+    if (lotes < 0.1) return `${cuenta.nombre}: stop de ${stopPts} pts muy amplio para $${riesgo}, no se envía`;
     const sl = largo ? entrada - stopPts : entrada + stopPts;
     const tp = body.takeProfit ? (largo ? entrada + body.takeProfit.amount : entrada - body.takeProfit.amount) : 0;
     const res = await enviar({ action: 'place_order', cfd, direction: largo ? 'LONG' : 'SHORT', volume: lotes, sl, tp1: tp, tp2: 0, tp3: 0 });

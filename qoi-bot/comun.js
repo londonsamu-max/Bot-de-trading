@@ -41,7 +41,7 @@ async function postSignal(body) {
     if (body.grupo) continue; // el motor F aparte solo opera en MT5 (en TradersPost compartiría la misma estrategia)
     const b = JSON.parse(JSON.stringify(body)); const r = root(b.ticker);
     if ((b.action === 'buy' || b.action === 'sell') && b.stopLoss && r) {
-      const q = Math.floor(a.riesgoUSD / (b.stopLoss.amount * PV[r])); const max = (a.maxQty || {})[r] ?? 10;
+      const q = Math.floor(a.riesgoUSD * (Number(b.riesgoFactor) || 1) / (b.stopLoss.amount * PV[r])); const max = (a.maxQty || {})[r] ?? 10;
       b.quantity = Math.min(q, max);
       if (b.quantity < 1) { out.push(`${a.nombre}: stop muy amplio para $${a.riesgoUSD}, no se envía`); continue; }
     }

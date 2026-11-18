@@ -75,6 +75,8 @@
     "HSL": 8,
     "HWAIT": 30,
     "cdNivel": 5,
-    "cdSalida": 15
+    "cdSalida": 15,
+    "favMax": 240,
+    "riesgoContra": 0.5
   }
 }

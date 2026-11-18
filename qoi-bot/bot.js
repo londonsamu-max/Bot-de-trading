@@ -17,7 +17,7 @@
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
       F: false, FSL: 8, FMG: 0, FTR: null, soloF: false,
       // Reglas experimentales (apagadas): G = venta en el call wall llegando desde abajo; H = ruptura en barra mediana
-      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, oiN: 0, oiPct: 0.9, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, oiN: 0, oiPct: 0.9, favTR: null, favMax: 0, favNoTP: false, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -45,6 +45,15 @@
       if (run && mode === 'A' && C.corr.A) Object.assign(lg, { tp: null, dist: P(C.corr.A[1]), act: P(C.corr.A[0]), tg: null });
       const TRr = regla === 'F' ? C.FTR : regla === 'G' ? C.GTR : regla === 'H' ? C.HTR : null; // trailing medido en R (F, G, H)
       if (TRr) { const R0 = Math.abs(e - stop); Object.assign(lg, { act: TRr[0] * R0, dist: TRr[1] * R0, tg: null, maxn: 120 }); }
+      // Operaciones A FAVOR del régimen (compra arriba del flip / venta debajo): gestión propia opcional (en prueba)
+      //   favTR [a, b]: trailing desde +a R a b R (solo si la regla no tiene el suyo) · favMax: minutos máximos · favNoTP: sin objetivo fijo
+      lg.favor = isFinite(s.flip) ? (e - s.flip) * d > 0 : null;
+      if (lg.favor) {
+        const R0 = Math.abs(e - stop);
+        if (C.favTR && !TRr) Object.assign(lg, { act: C.favTR[0] * R0, dist: C.favTR[1] * R0, tg: null });
+        if (C.favMax) lg.maxn = C.favMax;
+        if (C.favNoTP && lg.tp) { lg.tp = null; if (!lg.dist) Object.assign(lg, C.favTR ? { act: C.favTR[0] * R0, dist: C.favTR[1] * R0 } : { act: P(25), dist: P(15) }); }
+      }
       return lg;
     }
     function emit(ev) { st.events.push(ev); return ev; }
@@ -306,14 +315,17 @@
     const stopIdx = Math.abs(eNow - pos.st0); const stopF = futPts(tk, stopIdx);
     if ((eNow - pos.st0) * pos.d <= 0) { log('el precio ya está en el stop del modelo: no se envía', g ? tk + '·' + g : tk); return false; }
     if (stopF == null) { log('sin ratio MNQ/QQQ: no se envía', g ? tk + '·' + g : tk); return false; }
-    const qty = Math.min(c.maxQty, Math.floor(cfg.riesgoUSD / (stopF * c.pv)));
+    // Régimen al entrar: a favor = compra arriba del gamma flip o venta debajo. En contra se arriesga una fracción (motor.riesgoContra)
+    const flip = S.live && S.live[tk] ? S.live[tk].flip : NaN; const favor = isFinite(flip) ? (eNow - flip) * pos.d > 0 : true;
+    const factor = favor ? 1 : ((cfg.motor && cfg.motor.riesgoContra) || 1); pos.riesgoFactor = factor;
+    const qty = Math.min(c.maxQty, Math.floor(cfg.riesgoUSD * factor / (stopF * c.pv)));
     if (qty < 1) { log(`stop de ${stopF.toFixed(2)} pts es muy amplio para $${cfg.riesgoUSD}: no se envía`, g ? tk + '·' + g : tk); return false; }
-    const body = { ticker: c.ticker, action: pos.d > 0 ? 'buy' : 'sell', quantity: qty, stopLoss: { type: 'stop', amount: tick4(stopF) } }; if (g) body.grupo = g;
+    const body = { ticker: c.ticker, action: pos.d > 0 ? 'buy' : 'sell', quantity: qty, stopLoss: { type: 'stop', amount: tick4(stopF) } }; if (g) body.grupo = g; if (factor !== 1) body.riesgoFactor = factor;
     if (pos.tp) { const tpLeft = pos.tp - (eNow - pos.e) * pos.d; if (tpLeft > 0) body.takeProfit = { amount: tick4(futPts(tk, tpLeft)) }; }
     let r = await post(body);
     if (!r.ok && !r.papel) { log('la entrada falló: reintentando en 1 s', g ? tk + '·' + g : tk, 'FALLÓ ' + r.status); await wait(1000); r = await post(body); }
     pos.qty = qty; pos.sent = true;
-    log(`${r.papel ? '[papel] ' : ''}${body.action.toUpperCase()} ${qty} ${c.ticker} · stop ${body.stopLoss.amount} pts${body.takeProfit ? ' · objetivo ' + body.takeProfit.amount : ''} · ${pos.regla} ${pos.leg}${pos.run ? ' · corredor' : ''} · nivel ${pos.k}`, g ? tk + '·' + g : tk, r.papel ? '' : (r.ok ? 'OK ' + r.status : 'FALLÓ ' + r.status));
+    log(`${r.papel ? '[papel] ' : ''}${body.action.toUpperCase()} ${qty} ${c.ticker}${factor !== 1 ? ` · contra régimen: riesgo ×${factor}` : ''} · stop ${body.stopLoss.amount} pts${body.takeProfit ? ' · objetivo ' + body.takeProfit.amount : ''} · ${pos.regla} ${pos.leg}${pos.run ? ' · corredor' : ''} · nivel ${pos.k}`, g ? tk + '·' + g : tk, r.papel ? '' : (r.ok ? 'OK ' + r.status : 'FALLÓ ' + r.status));
     return true;
   }
   async function sendTrail(tk, pos, g) {

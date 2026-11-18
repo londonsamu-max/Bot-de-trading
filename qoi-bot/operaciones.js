@@ -47,9 +47,10 @@ function simuladas() {
   const ratio = Number(((fs.readFileSync(path.join(REG, 'consola.log'), 'utf8').match(/ratio MNQ\/QQQ automático = ([\d.]+)/g) || []).pop() || '= 41').split('= ')[1]);
   return JSON.parse(fs.readFileSync(f, 'utf8')).map((o) => {
     const k = o.tk === 'SPX' ? 1 : ratio; const cfd = o.tk === 'SPX' ? 'US500' : 'NAS100';
-    const stopC = Math.abs(o.e - o.st0) * k; const lotes = Math.min((cta.maxLotes || {})[cfd] || 50, Math.floor(cta.riesgoUSD / stopC * 100) / 100);
+    const favor = o.regimen ? ((o.lado === 'compra') === (o.regimen === '+')) : true; const factor = favor ? 1 : ((cfg.motor || {}).riesgoContra || 1);
+    const stopC = Math.abs(o.e - o.st0) * k; const lotes = Math.min((cta.maxLotes || {})[cfd] || 50, Math.floor(cta.riesgoUSD * factor / stopC * 100) / 100);
     return { tipo: 'simulada', dia: o.d, hora: o.hora, horaSalida: o.horaSal, instrumento: o.tk, cfd, motor: o.motor, regla: o.regla, nivel: o.k, tipoNivel: o.tipo,
-      lado: o.lado, lotes, entrada: o.e, stop: o.st0, salida: o.px, puntos: o.pts, R: o.R, usd: o.pts * k * lotes, salidaPor: o.why, estado: 'cerrada' };
+      lado: o.lado, lotes, entrada: o.e, stop: o.st0, salida: o.px, puntos: o.pts, R: o.R, usd: o.pts * k * lotes, salidaPor: o.why, estado: 'cerrada', regimen: favor ? 'a favor' : 'en contra' };
   });
 }
 
