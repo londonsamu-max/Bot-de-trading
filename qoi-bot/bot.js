@@ -15,7 +15,7 @@
       mg: 2.34e9, open: true, opd: 1.5, cht: 0.1,
       corr: { min: 3, ruptura: [30, 15], rebote: [20, 10], noTighten: true, maxMin: 180, A: [25, 15] },
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
-      F: false, FSL: 8,                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      F: false, FSL: 8, FMG: 0,                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -91,6 +91,7 @@
       if (isFinite(s.cw)) L.set(s.cw, 'call wall');
       if (isFinite(s.pw) && !L.has(s.pw)) L.set(s.pw, 'put wall');
       for (const k of majors(s, 40, 6, C.mg).slice(0, 2)) if (!L.has(k)) L.set(k, 'gex');
+      if (C.F && C.FMG) for (const k of majors(s, 40, 6, C.mg * C.FMG).slice(0, 4)) if (!L.has(k)) L.set(k, 'gexF'); // barras medianas: solo para la regla F (experimental)
       const reg = p > s.flip ? 1 : -1;
       for (const [k, tipo] of L) {
         const sk = s.strikes.find(x => x.k === k); if (!sk || Math.abs(p - k) > P(C.prox) || (k in st.last && n - st.last[k] < 15)) continue;
@@ -103,6 +104,7 @@
           side = sign(prev.reduce((a, v) => a + v, 0) / prev.length - k); if (!side) continue;
         }
         st.last[k] = n;
+        if (tipo === 'gexF') { if (sk.gf < 0 && side < 0 && sk.op > sk.oc) { st.pos = openLeg(s, n, p, -1, k + P(C.FSL), 'rebote', 'F', k, tipo, '', 'venta rechazo F'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; } continue; }
         const g = sk.gf, oc = sk.oc, op = sk.op, scs = sk.sc, sps = sk.sp;
         const near = s.strikes.filter(x => Math.abs(x.k - p) <= P(40));
         const drel = Math.abs(sk.dx) / median(near.map(x => Math.abs(x.dx)));
