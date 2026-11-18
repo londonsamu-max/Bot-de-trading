@@ -66,10 +66,10 @@ const nyHM = (t) => new Date(t.toLocaleString('en-US', { timeZone: 'America/New_
         for (const mo of motores) for (const ev of mo.eng.onMinute(s)) {
           if (ev.type === 'entry') {
             const bloqueada = mo.n >= cfg.maxOps || Rdia <= -cfg.maxPerdidaR;
-            mo.abierta = bloqueada ? null : ev.pos; if (!bloqueada) { mo.n++; mo.hEnt = nyHM(s.t); }
+            mo.abierta = bloqueada ? null : ev.pos; if (!bloqueada) { mo.n++; mo.hEnt = nyHM(s.t); mo.flipEnt = s.flip; mo.pxEnt = s.spot; }
           } else if (ev.type === 'exit' && mo.abierta === ev.pos) {
             const riesgo = Math.abs(ev.pos.e - ev.pos.st0); const R = ev.pts / riesgo; Rdia += R; mo.abierta = null;
-            ops.push({ tk, d, hora: mo.hEnt || nyHM(ev.pos.t0 || ev.t), horaSal: nyHM(ev.t), motor: mo.g || 'principal', regla: `${ev.pos.regla} ${ev.pos.leg || ''}`.trim(), lado: ev.pos.d > 0 ? 'compra' : 'venta', R, pts: ev.pts, why: ev.why, e: ev.pos.e, st0: ev.pos.st0, px: ev.px, k: ev.pos.k, tipo: ev.pos.tipo || '' });
+            ops.push({ tk, d, hora: mo.hEnt || nyHM(ev.pos.t0 || ev.t), horaSal: nyHM(ev.t), motor: mo.g || 'principal', regla: `${ev.pos.regla} ${ev.pos.leg || ''}`.trim(), lado: ev.pos.d > 0 ? 'compra' : 'venta', R, pts: ev.pts, why: ev.why, e: ev.pos.e, st0: ev.pos.st0, px: ev.px, k: ev.pos.k, tipo: ev.pos.tipo || '', flip: mo.flipEnt, regimen: mo.pxEnt > mo.flipEnt ? '+' : '-', aFavorFlip: (mo.pxEnt - mo.flipEnt) * ev.pos.d / TK[tk].sc });
           }
         }
       }

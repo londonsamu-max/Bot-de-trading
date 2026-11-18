@@ -53,7 +53,8 @@ async function renovar() {
 // Asegura un token vigente; devuelve true si tuvo que renovarlo.
 async function asegurar() {
   if (modoChrome) {
-    if (!ses) { try { ses = leer(); } catch (e) {} }
+    // si la sesión en memoria venció, puede haber una más nueva en el archivo (p. ej. llegó durante un reinicio)
+    if (!ses || expira(ses) - Date.now() / 1000 < 30) { try { const f = leer(); if (!ses || expira(f) > expira(ses)) ses = f; } catch (e) {} }
     if (!ses || expira(ses) - Date.now() / 1000 < 30) throw new Error('no hay token vigente de Chrome: abre Quantium en tu Chrome (con la sesión iniciada) y deja la pestaña abierta');
     return false;
   }
