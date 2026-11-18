@@ -47,14 +47,15 @@ const nyHM = (t) => new Date(t.toLocaleString('en-US', { timeZone: 'America/New_
   const bot = cargarBot();
   const ops = [];
   for (const tk of tks) {
-    const dias = (await get('/historial/dias', { ticker: tk, exps: '0dte' })).slice(0, maxDias).reverse();
+    let dias = (await get('/historial/dias', { ticker: tk, exps: '0dte' })).slice(0, maxDias).reverse();
+    if (process.env.QBOT_SOLO_CERRADOS) { const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date()); dias = dias.filter((d) => d !== hoy); } // comparaciones: sin el día en curso
     process.stderr.write(`${tk}: ${dias.length} días\n`);
     for (const d of dias) {
       let raw; try { raw = await dia(tk, d); } catch (e) { process.stderr.write(`  ${d} sin datos (${e.message})\n`); continue; }
       const snaps = raw.map(bot.QBOT._test.histSnap).filter(Boolean);
       const porMin = new Map(); for (const s of snaps) porMin.set(nyHM(s.t), s);
       // Igual que el bot en vivo: motor principal y, si config.json lo pide (motor.F + motor.separado), un motor aparte solo-F
-      const extra = Object.assign({}, process.env.QBOT_PROX ? { prox: Number(process.env.QBOT_PROX) } : {}, process.env.QBOT_F ? { F: true, FSL: Number(process.env.QBOT_F) } : {}, process.env.QBOT_MG ? { mg: TK[tk].mg * Number(process.env.QBOT_MG) } : {}, process.env.QBOT_SAR ? { sarTodo: true } : {}, process.env.QBOT_CAMBOS ? { cAmbos: true } : {}, process.env.QBOT_EXTRA ? JSON.parse(process.env.QBOT_EXTRA) : {});
+      const extra = Object.assign({}, process.env.QBOT_PROX ? { prox: Number(process.env.QBOT_PROX) } : {}, process.env.QBOT_F ? { F: true, FSL: Number(process.env.QBOT_F) } : {}, process.env.QBOT_MG ? { mg: TK[tk].mg * Number(process.env.QBOT_MG) } : {}, process.env.QBOT_SAR ? { sarTodo: true } : {}, process.env.QBOT_CAMBOS ? { cAmbos: true } : {}, process.env.QBOT_CDN ? { cdNivel: Number(process.env.QBOT_CDN) } : {}, process.env.QBOT_CDS ? { cdSalida: Number(process.env.QBOT_CDS) } : {}, process.env.QBOT_EXTRA ? JSON.parse(process.env.QBOT_EXTRA) : {});
       const m = process.env.QBOT_SIN_MOTOR ? {} : (cfg.motor || {});
       const base = { mg: TK[tk].mg, skipRebMinus: TK[tk].skip };
       const motores = [{ g: '', eng: bot.QOIEngine({ sc: TK[tk].sc, cfg: Object.assign({}, base, m, m.separado ? { F: false } : {}, process.env.QBOT_SOLOF ? { F: true, soloF: true, FSL: 8, FMG: 0.15, FTR: [1, 1] } : {}, extra) }) }];

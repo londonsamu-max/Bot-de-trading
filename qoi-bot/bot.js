@@ -17,7 +17,7 @@
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
       F: false, FSL: 8, FMG: 0, FTR: null, soloF: false,
       // Reglas experimentales (apagadas): G = venta en el call wall llegando desde abajo; H = ruptura en barra mediana
-      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -90,7 +90,7 @@
       if (st.pos && st.pos.n0 === n) return st.events;
       if (st.pos) { manage(s, n, p, mm); return st.events; }
       if (st.pend) { checkPending(s, n, p, mm); if (st.pos || (st.pend && C.pendingBlocks)) return st.events; }
-      if (n === 0 || n - st.cool < 15 || mm >= 930 || (mm >= 780 && mm < 870) || mm < 570) return st.events;
+      if (n === 0 || n - st.cool < C.cdSalida || mm >= 930 || (mm >= 780 && mm < 870) || mm < 570) return st.events;
       const L = new Map();
       if (isFinite(s.cw)) L.set(s.cw, 'call wall');
       if (isFinite(s.pw) && !L.has(s.pw)) L.set(s.pw, 'put wall');
@@ -100,7 +100,7 @@
       if (C.soloG) { L.clear(); if (isFinite(s.cw)) L.set(s.cw, 'call wall'); } // barras medianas: solo para la regla F (experimental)
       const reg = p > s.flip ? 1 : -1;
       for (const [k, tipo] of L) {
-        const sk = s.strikes.find(x => x.k === k); if (!sk || Math.abs(p - k) > P(C.prox) || (k in st.last && n - st.last[k] < 15)) continue;
+        const sk = s.strikes.find(x => x.k === k); if (!sk || Math.abs(p - k) > P(C.prox) || (k in st.last && n - st.last[k] < C.cdNivel)) continue;
         let side;
         if (mm < 585 && H.length < 16) {
           if (!C.open || (tipo !== 'call wall' && tipo !== 'put wall') || Math.abs(p - k) > P(C.opd) || (k in st.last)) continue;
