@@ -15,7 +15,9 @@
       mg: 2.34e9, open: true, opd: 1.5, cht: 0.1,
       corr: { min: 3, ruptura: [30, 15], rebote: [20, 10], noTighten: true, maxMin: 180, A: [25, 15] },
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
-      F: false, FSL: 8, FMG: 0, FTR: null, soloF: false, sarTodo: false, // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      F: false, FSL: 8, FMG: 0, FTR: null, soloF: false,
+      // Reglas experimentales (apagadas): G = venta en el call wall llegando desde abajo; H = ruptura en barra mediana
+      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -41,7 +43,8 @@
         dist: tr ? P(tr[1]) : null, act: tr ? P(tr[0]) : null, tg: tr ? ((run && C.corr.noTighten) ? null : sigVerde(s, e, d)) : null,
         tp: mode === 'A' ? P(20) : null, maxn: run ? C.corr.maxMin : 120, sar: false };
       if (run && mode === 'A' && C.corr.A) Object.assign(lg, { tp: null, dist: P(C.corr.A[1]), act: P(C.corr.A[0]), tg: null });
-      if (regla === 'F' && C.FTR) { const R0 = Math.abs(e - stop); Object.assign(lg, { act: C.FTR[0] * R0, dist: C.FTR[1] * R0, tg: null, maxn: 120 }); } // F: trailing desde +1R a 1R
+      const TRr = regla === 'F' ? C.FTR : regla === 'G' ? C.GTR : regla === 'H' ? C.HTR : null; // trailing medido en R (F, G, H)
+      if (TRr) { const R0 = Math.abs(e - stop); Object.assign(lg, { act: TRr[0] * R0, dist: TRr[1] * R0, tg: null, maxn: 120 }); }
       return lg;
     }
     function emit(ev) { st.events.push(ev); return ev; }
@@ -92,7 +95,9 @@
       if (isFinite(s.cw)) L.set(s.cw, 'call wall');
       if (isFinite(s.pw) && !L.has(s.pw)) L.set(s.pw, 'put wall');
       for (const k of majors(s, 40, 6, C.mg).slice(0, 2)) if (!L.has(k)) L.set(k, 'gex');
-      if (C.F && C.FMG) for (const k of majors(s, 40, 6, C.mg * C.FMG).slice(0, 4)) if (!L.has(k)) L.set(k, 'gexF'); // barras medianas: solo para la regla F (experimental)
+      if (C.F && C.FMG) for (const k of majors(s, 40, 6, C.mg * C.FMG).slice(0, 4)) if (!L.has(k)) L.set(k, 'gexF');
+      if (C.soloH) { L.clear(); for (const k of majors(s, 40, 6, C.mg * 0.15).slice(0, 4)) { const x = s.strikes.find(z => z.k === k); if (x && Math.abs(x.gf) < C.mg) L.set(k, 'barra mediana'); } }
+      if (C.soloG) { L.clear(); if (isFinite(s.cw)) L.set(s.cw, 'call wall'); } // barras medianas: solo para la regla F (experimental)
       const reg = p > s.flip ? 1 : -1;
       for (const [k, tipo] of L) {
         const sk = s.strikes.find(x => x.k === k); if (!sk || Math.abs(p - k) > P(C.prox) || (k in st.last && n - st.last[k] < 15)) continue;
@@ -105,6 +110,8 @@
           side = sign(prev.reduce((a, v) => a + v, 0) / prev.length - k); if (!side) continue;
         }
         st.last[k] = n;
+        if (C.soloG) { if (side < 0) { st.pos = openLeg(s, n, p, -1, k + P(C.GSL), 'rebote', 'G', k, tipo, '', 'venta call wall G'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; } continue; }
+        if (C.soloH) { const d = -side; st.pend = { n0: n, t0: s.t, d, trig: k + d * P(C.HBRK), stop: k - d * P(C.HSL), cancel: k - d * P(8), wait: C.HWAIT, regla: 'H', k, tipo, info: '', leg: (d > 0 ? 'compra' : 'venta') + ' ruptura H' }; emit({ type: 'armed', t: s.t, pend: st.pend }); break; }
         if (tipo === 'gexF') { if (sk.gf < 0 && side < 0 && sk.op > sk.oc) { st.pos = openLeg(s, n, p, -1, k + P(C.FSL), 'rebote', 'F', k, tipo, '', 'venta rechazo F'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; } continue; }
         const g = sk.gf, oc = sk.oc, op = sk.op, scs = sk.sc, sps = sk.sp;
         const near = s.strikes.filter(x => Math.abs(x.k - p) <= P(40));
