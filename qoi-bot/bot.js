@@ -17,7 +17,7 @@
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
       F: false, FSL: 8, FMG: 0, FTR: null, soloF: false,
       // Reglas experimentales (apagadas): G = venta en el call wall llegando desde abajo; H = ruptura en barra mediana
-      soloG: false, GSL: 8, GTR: null, soloH: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, oiN: 0, oiPct: 0.9, favTR: null, favMax: 0, favNoTP: false, chopN: 0, chopDist: 0, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      soloG: false, GSL: 8, GTR: null, soloH: false, HFav: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, oiN: 0, oiPct: 0.9, favTR: null, favMax: 0, favNoTP: false, chopN: 0, chopDist: 0, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -124,7 +124,7 @@
         }
         st.last[k] = n;
         if (C.soloG) { if (side < 0 && !((C.chopN && (st.cruces || 0) >= C.chopN) || (C.chopDist && isFinite(s.flip) && Math.abs(p - s.flip) < P(C.chopDist)))) { st.pos = openLeg(s, n, p, -1, k + P(C.GSL), 'rebote', 'G', k, tipo, '', 'venta call wall G'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; } continue; }
-        if (C.soloH) { const d = -side; st.pend = { n0: n, t0: s.t, d, trig: k + d * P(C.HBRK), stop: k - d * P(C.HSL), cancel: k - d * P(8), wait: C.HWAIT, regla: 'H', k, tipo, info: '', leg: (d > 0 ? 'compra' : 'venta') + ' ruptura H' }; emit({ type: 'armed', t: s.t, pend: st.pend }); break; }
+        if (C.soloH) { const d = -side; if (C.HFav && !(isFinite(s.flip) && (p - s.flip) * d > 0)) continue; st.pend = { n0: n, t0: s.t, d, trig: k + d * P(C.HBRK), stop: k - d * P(C.HSL), cancel: k - d * P(8), wait: C.HWAIT, regla: 'H', k, tipo, info: '', leg: (d > 0 ? 'compra' : 'venta') + ' ruptura H' }; emit({ type: 'armed', t: s.t, pend: st.pend }); break; }
         if (tipo === 'gexF') { if (sk.gf < 0 && side < 0 && sk.op > sk.oc) { st.pos = openLeg(s, n, p, -1, k + P(C.FSL), 'rebote', 'F', k, tipo, '', 'venta rechazo F'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; } continue; }
         const g = sk.gf, oc = sk.oc, op = sk.op, scs = sk.sc, sps = sk.sp;
         const near = s.strikes.filter(x => Math.abs(x.k - p) <= P(40));

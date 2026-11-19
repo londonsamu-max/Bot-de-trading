@@ -56,34 +56,16 @@
   "pollMs": 2000,
   "sesionDesdeChrome": true,
   "motor": {
-    "F": true,
-    "separado": true,
-    "FSL": 8,
-    "FMG": 0.15,
-    "FTR": [
-      1,
-      1
-    ],
-    "G": true,
-    "GSL": 8,
-    "GTR": [
-      1,
-      1
-    ],
+    "version": 2,
     "H": true,
+    "HFav": true,
     "HBRK": 5,
     "HSL": 8,
     "HWAIT": 30,
-    "cdNivel": 5,
-    "cdSalida": 15,
-    "favMax": 240,
     "riesgoContra": 0.5,
-    "volumen": true,
-    "lejosNodos": 1,
-    "dentroValor": 0.5,
-    "redondos": 1.5,
-    "riesgoMax": 1.5,
     "contraDia": 0.5,
-    "contraDiaPts": 10
+    "contraDiaPts": 10,
+    "redondos": 1.5,
+    "riesgoMax": 1.5
   }
 }

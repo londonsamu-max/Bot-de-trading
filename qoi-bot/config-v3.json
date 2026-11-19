@@ -1,0 +1,89 @@
+{
+  "modo": "demo",
+  "riesgoUSD": 250,
+  "maxPerdidaR": 3,
+  "maxOps": 8,
+  "SPX": {
+    "activo": true,
+    "ticker": "MESZ2026",
+    "maxQty": 10
+  },
+  "QQQ": {
+    "activo": true,
+    "ticker": "MNQZ2026",
+    "maxQty": 10
+  },
+  "ratioMNQ": null,
+  "cerrarHoraNY": "16:10",
+  "verVentana": true,
+  "cuentas": [
+    {
+      "nombre": "MT5 Pepperstone demo",
+      "tipo": "mt5",
+      "activa": true,
+      "riesgoUSD": 250,
+      "usdPorPuntoLote": {
+        "US500": 1,
+        "NAS100": 1
+      },
+      "maxLotes": {
+        "US500": 50,
+        "NAS100": 50
+      },
+      "cuentaPermitida": null
+    },
+    {
+      "nombre": "Tradovate demo",
+      "webhook": "",
+      "activa": false,
+      "riesgoUSD": 250,
+      "maxQty": {
+        "MES": 10,
+        "MNQ": 10
+      }
+    },
+    {
+      "nombre": "Fondeo (Apex/Topstep/otra)",
+      "webhook": "",
+      "activa": false,
+      "riesgoUSD": 200,
+      "maxQty": {
+        "MES": 5,
+        "MNQ": 5
+      }
+    }
+  ],
+  "pollMs": 2000,
+  "sesionDesdeChrome": true,
+  "motor": {
+    "F": true,
+    "separado": true,
+    "FSL": 8,
+    "FMG": 0.15,
+    "FTR": [
+      1,
+      1
+    ],
+    "G": true,
+    "GSL": 8,
+    "GTR": [
+      1,
+      1
+    ],
+    "H": true,
+    "HBRK": 5,
+    "HSL": 8,
+    "HWAIT": 30,
+    "cdNivel": 5,
+    "cdSalida": 15,
+    "favMax": 240,
+    "riesgoContra": 0.5,
+    "volumen": true,
+    "lejosNodos": 1,
+    "dentroValor": 0.5,
+    "redondos": 1.5,
+    "riesgoMax": 1.5,
+    "contraDia": 0.5,
+    "contraDiaPts": 10
+  }
+}
