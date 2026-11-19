@@ -63,6 +63,7 @@ function factor(o, M) {
   }
   const ruptura = /ruptura/.test(o.regla); const redondo = o.tk === 'SPX' ? o.k % 50 === 0 : o.k % 5 === 0;
   if (M.redondos && ruptura && redondo) { f *= M.redondos; motivos.push('ruptura en número redondo'); }
+  if (/X/.test(o.regla) && M.XRiesgo) { f *= M.XRiesgo; motivos.push('regla X'); }
   if (M.riesgoMax && f > M.riesgoMax) { f = M.riesgoMax; motivos.push('tope'); }
   return { factor: Math.round(f * 1000) / 1000, motivos };
 }

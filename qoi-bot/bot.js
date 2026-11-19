@@ -17,7 +17,7 @@
       D: { brk: 5, sl: 12 }, E: { brk: 10, sl: 12 },
       F: false, FSL: 8, FMG: 0, FTR: null, soloF: false,
       // Reglas experimentales (apagadas): G = venta en el call wall llegando desde abajo; H = ruptura en barra mediana
-      soloG: false, GSL: 8, GTR: null, soloH: false, HFav: false, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, oiN: 0, oiPct: 0.9, favTR: null, favMax: 0, favNoTP: false, chopN: 0, chopDist: 0, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
+      soloG: false, GSL: 8, GTR: null, soloH: false, HFav: false, soloX: false, XBRK: 5, XSL: 8, XWAIT: 60, XTR: null, HBRK: 3, HSL: 5, HWAIT: 30, HTR: null, sarTodo: false, cAmbos: false, cdNivel: 15, cdSalida: 15, oiN: 0, oiPct: 0.9, favTR: null, favMax: 0, favNoTP: false, chopN: 0, chopDist: 0, // pausas en minutos: por nivel ya evaluado / tras cerrar una operación // sarTodo: vuelta a ruptura tras perder el rebote también con DEX- charm- (en prueba)                      // regla F (experimental): rechazo en barra de gamma negativa de puts, llegando desde abajo → venta
       prox: 1.5,                             // distancia máxima al nivel para evaluarlo (puntos SPX; en QQQ se escala ×0.089)
       pendingBlocks: false,                  // si una orden pendiente bloquea otras entradas
       noRepeat: true,                        // no volver a armar D o E en un nivel donde ya perdieron hoy
@@ -43,7 +43,7 @@
         dist: tr ? P(tr[1]) : null, act: tr ? P(tr[0]) : null, tg: tr ? ((run && C.corr.noTighten) ? null : sigVerde(s, e, d)) : null,
         tp: mode === 'A' ? P(20) : null, maxn: run ? C.corr.maxMin : 120, sar: false };
       if (run && mode === 'A' && C.corr.A) Object.assign(lg, { tp: null, dist: P(C.corr.A[1]), act: P(C.corr.A[0]), tg: null });
-      const TRr = regla === 'F' ? C.FTR : regla === 'G' ? C.GTR : regla === 'H' ? C.HTR : null; // trailing medido en R (F, G, H)
+      const TRr = regla === 'F' ? C.FTR : regla === 'G' ? C.GTR : regla === 'H' ? C.HTR : regla === 'X' ? C.XTR : null; // trailing medido en R (F, G, H, X)
       if (TRr) { const R0 = Math.abs(e - stop); Object.assign(lg, { act: TRr[0] * R0, dist: TRr[1] * R0, tg: null, maxn: 120 }); }
       // Operaciones A FAVOR del régimen (compra arriba del flip / venta debajo): gestión propia opcional (en prueba)
       //   favTR [a, b]: trailing desde +a R a b R (solo si la regla no tiene el suyo) · favMax: minutos máximos · favNoTP: sin objetivo fijo
@@ -134,6 +134,9 @@
         const info = `${oc >= op ? 'calls' : 'puts'} ${(oc >= op ? scs : sps) > 0 ? 'vendidos' : 'comprados'} · GEX ${(g / 1e6).toFixed(0)}M · ${dc} · régimen ${reg > 0 ? '+' : '−'}`;
         // Motor solo-F: únicamente la regla F, en su propio espacio (no compite con las demás reglas)
         if (C.soloF) { if (g < 0 && side < 0 && op > oc) { st.pos = openLeg(s, n, p, -1, k + P(C.FSL), 'rebote', 'F', k, tipo, info, 'venta rechazo F'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; } continue; }
+        // Motor solo-X: barra verde por puts vendidos (dominantes) pero con calls comprados = flujo mezclado. El rebote no tiene ventaja;
+        // si el precio la cruza XBRK pts se acompaña la ruptura, stop XSL pts del otro lado del nivel, trailing en R (XTR)
+        if (C.soloX) { if (!(g > 0 && op > oc && sps > 0 && scs < 0)) continue; const d = -side; st.pend = { n0: n, t0: s.t, d, trig: k + d * P(C.XBRK), stop: k - d * P(C.XSL), cancel: k - d * P(15), wait: C.XWAIT, regla: 'X', k, tipo, info, leg: (d > 0 ? 'compra' : 'venta') + ' ruptura X' }; emit({ type: 'armed', t: s.t, pend: st.pend }); break; }
         // Regla A
         if (g < 0 && side > 0 && scs < 0 && oc > op) { st.pos = openLeg(s, n, p, 1, k - P(20), 'A', 'A', k, tipo, info, 'compra A'); emit({ type: 'entry', t: s.t, pos: st.pos }); break; }
         // Regla D
@@ -340,16 +343,19 @@
     const esRuptura = pos.mode === 'ruptura' || /ruptura/.test(pos.leg || '');
     const redondo = tk === 'SPX' ? pos.k % 50 === 0 : pos.k % 5 === 0;
     if (M.redondos && esRuptura && redondo) { factor *= M.redondos; motivos.push(`ruptura en número redondo ×${M.redondos}`); }
+    if (pos.regla === 'X' && M.XRiesgo) { factor *= M.XRiesgo; motivos.push(`regla X (en prueba) ×${M.XRiesgo}`); }
     if (M.riesgoMax && factor > M.riesgoMax) { factor = M.riesgoMax; motivos.push(`tope ×${M.riesgoMax}`); }
     factor = Math.round(factor * 1000) / 1000; pos.riesgoFactor = factor; pos.riesgoMotivos = motivos;
     const qty = Math.min(c.maxQty, Math.floor(cfg.riesgoUSD * factor / (stopF * c.pv)));
-    if (qty < 1) { log(`stop de ${stopF.toFixed(2)} pts es muy amplio para $${cfg.riesgoUSD}: no se envía`, g ? tk + '·' + g : tk); return false; }
+    // Con el programa (qbotPost), cada cuenta calcula su propio tamaño (MT5 en lotes fraccionarios desde 0.1; futuros en contratos)
+    // y descarta por su cuenta si no alcanza: aquí solo se bloquea cuando la página envía directo a un webhook de futuros
+    if (qty < 1 && !window.qbotPost) { log(`stop de ${stopF.toFixed(2)} pts es muy amplio para $${cfg.riesgoUSD}: no se envía`, g ? tk + '·' + g : tk); return false; }
     const body = { ticker: c.ticker, action: pos.d > 0 ? 'buy' : 'sell', quantity: qty, stopLoss: { type: 'stop', amount: tick4(stopF) } }; if (g) body.grupo = g; if (factor !== 1) body.riesgoFactor = factor;
     if (pos.tp) { const tpLeft = pos.tp - (eNow - pos.e) * pos.d; if (tpLeft > 0) body.takeProfit = { amount: tick4(futPts(tk, tpLeft)) }; }
     let r = await post(body);
     if (!r.ok && !r.papel) { log('la entrada falló: reintentando en 1 s', g ? tk + '·' + g : tk, 'FALLÓ ' + r.status); await wait(1000); r = await post(body); }
     pos.qty = qty; pos.sent = true;
-    log(`${r.papel ? '[papel] ' : ''}${body.action.toUpperCase()} ${qty} ${c.ticker}${factor !== 1 || motivos.length ? ` · riesgo ×${factor} (${motivos.join(', ')})` : ''} · stop ${body.stopLoss.amount} pts${body.takeProfit ? ' · objetivo ' + body.takeProfit.amount : ''} · ${pos.regla} ${pos.leg}${pos.run ? ' · corredor' : ''} · nivel ${pos.k}`, g ? tk + '·' + g : tk, r.papel ? '' : (r.ok ? 'OK ' + r.status : 'FALLÓ ' + r.status));
+    log(`${r.papel ? '[papel] ' : ''}${body.action.toUpperCase()} ${qty >= 1 ? qty + ' ' : ''}${c.ticker}${factor !== 1 || motivos.length ? ` · riesgo ×${factor} (${motivos.join(', ')})` : ''} · stop ${body.stopLoss.amount} pts${body.takeProfit ? ' · objetivo ' + body.takeProfit.amount : ''} · ${pos.regla} ${pos.leg}${pos.run ? ' · corredor' : ''} · nivel ${pos.k}`, g ? tk + '·' + g : tk, r.papel ? '' : (r.ok ? 'OK ' + r.status : 'FALLÓ ' + r.status));
     return true;
   }
   async function sendTrail(tk, pos, g) {
@@ -411,13 +417,13 @@
   // Motor principal (reglas A, C, D, E) y motores aparte, uno por regla experimental activa en config.json
   // ("motor": {"F": true, "separado": true, "G": true, "H": true, ...}). Cada uno tiene su propio espacio y sus propias
   // posiciones en el bróker (grupo F / G / H): no le quitan operaciones al principal ni se cierran entre sí.
-  const SOLO = { F: { F: true, soloF: true }, G: { soloG: true }, H: { soloH: true } };
+  const SOLO = { F: { F: true, soloF: true }, G: { soloG: true }, H: { soloH: true }, X: { soloX: true } };
   function motorCfg(tk, g) {
     const m = cfg.motor || {}; const base = { mg: TK[tk].mg, skipRebMinus: TK[tk].skip };
     if (g) return Object.assign(base, m, SOLO[g]);
     return Object.assign(base, m, m.separado ? { F: false } : {});
   }
-  const gruposExtra = () => { const m = cfg.motor || {}; return ['F', 'G', 'H'].filter((g) => g === 'F' ? (m.F && m.separado) : m[g]); };
+  const gruposExtra = () => { const m = cfg.motor || {}; return ['F', 'G', 'H', 'X'].filter((g) => g === 'F' ? (m.F && m.separado) : m[g]); };
   const motores = (tk) => [[S.eng[tk], '']].concat(Object.entries((S.extra && S.extra[tk]) || {}).map(([g, e]) => [e, g])); // [motor, grupo]
   async function warmup() { for (const tk of ['SPX', 'QQQ']) await warmTk(tk); }
   async function warmTk(tk) {

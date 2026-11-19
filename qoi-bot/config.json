@@ -68,6 +68,12 @@
     "redondos": 1.5,
     "riesgoMax": 1.5,
     "cdNivel": 5,
-    "favMax": 240
+    "favMax": 240,
+    "X": true,
+    "XTR": [
+      0.5,
+      0.5
+    ],
+    "XRiesgo": 0.5
   }
 }
